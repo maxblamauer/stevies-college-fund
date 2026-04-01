@@ -2,7 +2,7 @@ import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { collection, addDoc, getDocs, doc, query, where, writeBatch, Timestamp } from 'firebase/firestore';
 import { db } from '../firebase';
-import { parseBMOStatement } from '../lib/parser';
+import { parseStatement } from '../lib/parser';
 import type { CategoryMapping } from '../lib/categorize';
 
 interface Props {
@@ -32,7 +32,7 @@ export function Upload({ onUploaded, householdId }: Props) {
         const mappings: CategoryMapping[] = mappingsSnap.docs.map((doc) => doc.data() as CategoryMapping);
 
         // Parse the PDF
-        const parsed = await parseBMOStatement(data, mappings);
+        const parsed = await parseStatement(data, mappings);
 
         // Check for duplicate
         const existingSnap = await getDocs(
@@ -100,7 +100,7 @@ export function Upload({ onUploaded, householdId }: Props) {
   return (
     <div className="upload-page">
       <h2>Upload Statement</h2>
-      <p className="upload-hint">Upload a BMO credit card statement PDF</p>
+      <p className="upload-hint">Upload a credit card statement PDF</p>
 
       <div
         {...getRootProps()}
