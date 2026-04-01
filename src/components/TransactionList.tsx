@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { collection, getDocs, doc, updateDoc, query, where, addDoc, writeBatch, orderBy, QueryConstraint } from 'firebase/firestore';
+import { collection, getDocs, doc, updateDoc, query, where, addDoc, writeBatch } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CATEGORIES } from '../types';
 
@@ -27,23 +27,29 @@ export function TransactionList({ onUpdate, initialCategory = '', householdId }:
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editCategory, setEditCategory] = useState('');
 
-  const fetchTransactions = async () => {
-    const constraints: QueryConstraint[] = [orderBy('transDate', 'desc')];
-    if (filter.category) constraints.push(where('category', '==', filter.category));
-    if (filter.cardholder) constraints.push(where('cardholder', '==', filter.cardholder));
-    if (filter.confirmed === 'true') constraints.push(where('confirmed', '==', true));
-    if (filter.confirmed === 'false') constraints.push(where('confirmed', '==', false));
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
 
-    const q = query(collection(db, 'households', householdId, 'transactions'), ...constraints);
-    const snap = await getDocs(q);
-    setTransactions(
-      snap.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction))
-    );
+  const fetchTransactions = async () => {
+    const snap = await getDocs(collection(db, 'households', householdId, 'transactions'));
+    const all = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as Transaction))
+      .sort((a, b) => b.transDate.localeCompare(a.transDate));
+    setAllTransactions(all);
   };
 
   useEffect(() => {
     fetchTransactions();
-  }, [filter]);
+  }, []);
+
+  // Filter client-side to avoid composite index requirements
+  useEffect(() => {
+    let filtered = allTransactions;
+    if (filter.category) filtered = filtered.filter((t) => t.category === filter.category);
+    if (filter.cardholder) filtered = filtered.filter((t) => t.cardholder === filter.cardholder);
+    if (filter.confirmed === 'true') filtered = filtered.filter((t) => t.confirmed);
+    if (filter.confirmed === 'false') filtered = filtered.filter((t) => !t.confirmed);
+    setTransactions(filtered);
+  }, [allTransactions, filter]);
 
   const updateCategory = async (id: string, description: string) => {
     const pattern = extractMerchantPattern(description);
