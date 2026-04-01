@@ -85,8 +85,7 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'wok', w: 4 },
     { kw: 'pho ', w: 5 },
     { kw: 'tst-', w: 6 },
-  ],
-  'Fast Food & Coffee': [
+    // Fast food & coffee chains
     { kw: 'mcdonald', w: 10 },
     { kw: 'tim horton', w: 10 },
     { kw: 'subway ', w: 8 },
@@ -108,10 +107,7 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'hot bagel', w: 8 },
     { kw: 'jc hot bagel', w: 10 },
     { kw: 'jcs hot bagel', w: 10 },
-    { kw: 'coffee', w: 6 },
     { kw: 'coffeedshop', w: 8 },
-    { kw: 'cafe ', w: 5 },
-    { kw: 'café', w: 5 },
     { kw: 'firebat coffee', w: 10 },
     { kw: 'coffee culture', w: 10 },
     { kw: 'tribeca coffee', w: 10 },
@@ -119,11 +115,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: "craig's cookies", w: 10 },
     { kw: 'fibs cafe', w: 10 },
     { kw: 'donut', w: 6 },
-    { kw: 'bagel', w: 5 },
-    { kw: 'pizza', w: 5 },
-    { kw: 'burrito', w: 5 },
-    { kw: 'pita', w: 4 },
-    { kw: 'wrap', w: 3 },
   ],
   'Gas & Fuel': [
     { kw: 'shell ', w: 8 },

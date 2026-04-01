@@ -15,7 +15,6 @@ const CATEGORY_COLORS: Record<string, string> = {
   'Shopping - Online':    '#3ab5a5',
   'Utilities':            '#b76ad4',
   'Shopping - General':   '#7a8ee0',
-  'Fast Food & Coffee':   '#e0a832',
   'Subscriptions':        '#5aa0d4',
   'Health & Pharmacy':    '#d4709a',
   'Alcohol & Liquor':     '#88b44a',

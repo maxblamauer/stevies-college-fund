@@ -35,7 +35,6 @@ export interface MonthlyTotal {
 export const CATEGORIES = [
   'Groceries',
   'Restaurants & Dining',
-  'Fast Food & Coffee',
   'Gas & Fuel',
   'Transportation',
   'Shopping - Clothing',
