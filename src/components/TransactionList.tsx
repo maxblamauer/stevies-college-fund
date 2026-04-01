@@ -165,7 +165,6 @@ export function TransactionList({ onUpdate, initialCategory = '', initialStateme
     .filter((t) => t.isCredit && t.category !== 'Payment')
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const activeFilterCount = [filter.category, filter.cardholder, filter.confirmed, filter.statement].filter(Boolean).length;
 
   return (
     <div className="transactions-page">
