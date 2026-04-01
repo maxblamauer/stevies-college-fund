@@ -734,6 +734,13 @@ tr:hover {
   .dashboard-controls {
     flex-direction: row;
     justify-content: center;
+    width: 100%;
+  }
+
+  .dashboard-controls .filter-pill {
+    flex: 1;
+    min-width: 0;
+    font-size: 11px;
   }
 
   .stats-summary {
