@@ -732,7 +732,7 @@ tr:hover {
   }
 
   .dashboard-controls {
-    flex-wrap: wrap;
+    flex-direction: row;
     justify-content: center;
   }
 
