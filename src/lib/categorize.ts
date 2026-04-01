@@ -1,25 +1,15 @@
-import db from './db.js';
-
-// ============================================================
-// Keyword scoring engine
-//
-// Each category has a list of weighted keywords/phrases.
-// A description is scored against every category — highest wins.
-// Multi-word phrases score higher (more specific = more confident).
-// This replaces regex rules with something that handles truncated
-// merchant names, partial matches, and novel merchants gracefully.
-// ============================================================
-
 interface KeywordRule {
-  /** keyword or phrase (lowercase) */
   kw: string;
-  /** score weight — longer/more-specific phrases should score higher */
   w: number;
+}
+
+export interface CategoryMapping {
+  merchantPattern: string;
+  category: string;
 }
 
 const KEYWORDS: Record<string, KeywordRule[]> = {
   'Groceries': [
-    // Store names
     { kw: 'costco wholesale', w: 10 },
     { kw: 'no frills', w: 10 },
     { kw: 'fortino', w: 10 },
@@ -38,14 +28,11 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'zehrs', w: 10 },
     { kw: 'independent grocer', w: 10 },
     { kw: 'voila', w: 8 },
-    // Generic keywords
     { kw: 'grocer', w: 5 },
     { kw: 'supermarket', w: 5 },
     { kw: 'natural food', w: 6 },
   ],
-
   'Restaurants & Dining': [
-    // Specific restaurants
     { kw: 'fionn maccool', w: 10 },
     { kw: 'the poacher', w: 10 },
     { kw: 'bardo restaurant', w: 10 },
@@ -63,9 +50,9 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'pai northern thai', w: 10 },
     { kw: 'cafe landwer', w: 10 },
     { kw: 'radius on brant', w: 10 },
-    { kw: 'pj o\'brien', w: 10 },
+    { kw: "pj o'brien", w: 10 },
     { kw: 'the argyle', w: 10 },
-    { kw: 'bernie\'s tavern', w: 10 },
+    { kw: "bernie's tavern", w: 10 },
     { kw: 'malarkey', w: 8 },
     { kw: 'russell williams', w: 10 },
     { kw: 'wandering scott', w: 10 },
@@ -78,7 +65,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'ubereats', w: 10 },
     { kw: 'skip the dishes', w: 10 },
     { kw: 'doordash', w: 10 },
-    // Generic keywords
     { kw: 'restaurant', w: 8 },
     { kw: 'tavern', w: 7 },
     { kw: 'grill', w: 5 },
@@ -98,11 +84,9 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'bar +', w: 4 },
     { kw: 'wok', w: 4 },
     { kw: 'pho ', w: 5 },
-    { kw: 'tst-', w: 6 },   // TouchBistro POS prefix = restaurant
+    { kw: 'tst-', w: 6 },
   ],
-
   'Fast Food & Coffee': [
-    // Chains
     { kw: 'mcdonald', w: 10 },
     { kw: 'tim horton', w: 10 },
     { kw: 'subway ', w: 8 },
@@ -114,7 +98,7 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'pizza pizza', w: 10 },
     { kw: 'firehouse subs', w: 10 },
     { kw: 'dominos', w: 10 },
-    { kw: 'domino\'s', w: 10 },
+    { kw: "domino's", w: 10 },
     { kw: 'chipotle', w: 10 },
     { kw: 'burrito boyz', w: 10 },
     { kw: 'smokes poutinerie', w: 10 },
@@ -124,7 +108,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'hot bagel', w: 8 },
     { kw: 'jc hot bagel', w: 10 },
     { kw: 'jcs hot bagel', w: 10 },
-    // Coffee shops
     { kw: 'coffee', w: 6 },
     { kw: 'coffeedshop', w: 8 },
     { kw: 'cafe ', w: 5 },
@@ -133,9 +116,8 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'coffee culture', w: 10 },
     { kw: 'tribeca coffee', w: 10 },
     { kw: 'ecs coffee', w: 10 },
-    { kw: 'craig\'s cookies', w: 10 },
+    { kw: "craig's cookies", w: 10 },
     { kw: 'fibs cafe', w: 10 },
-    // Generic
     { kw: 'donut', w: 6 },
     { kw: 'bagel', w: 5 },
     { kw: 'pizza', w: 5 },
@@ -143,7 +125,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'pita', w: 4 },
     { kw: 'wrap', w: 3 },
   ],
-
   'Gas & Fuel': [
     { kw: 'shell ', w: 8 },
     { kw: 'esso', w: 8 },
@@ -161,7 +142,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'ev charging', w: 8 },
     { kw: 'chargepoint', w: 8 },
   ],
-
   'Transportation': [
     { kw: 'uber canada/ubertrip', w: 12 },
     { kw: 'ubertrip', w: 10 },
@@ -177,7 +157,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'up express', w: 10 },
     { kw: 'parking', w: 5 },
   ],
-
   'Shopping - Clothing': [
     { kw: 'old navy', w: 10 },
     { kw: 'hm ca', w: 8 },
@@ -193,17 +172,15 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'lululemon', w: 10 },
     { kw: 'roots', w: 6 },
   ],
-
   'Shopping - Online': [
     { kw: 'amazon', w: 10 },
     { kw: 'amzn', w: 10 },
-    { kw: 'wf* ca', w: 8 },  // Wayfair
+    { kw: 'wf* ca', w: 8 },
     { kw: 'wayfair', w: 10 },
     { kw: 'ebay', w: 8 },
     { kw: 'etsy', w: 8 },
     { kw: 'www.', w: 3 },
   ],
-
   'Shopping - General': [
     { kw: 'wal-mart', w: 10 },
     { kw: 'walmart', w: 10 },
@@ -215,7 +192,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'handmade', w: 4 },
     { kw: 'centro garden', w: 8 },
   ],
-
   'Shopping - Home': [
     { kw: 'ikea', w: 10 },
     { kw: 'homesense', w: 10 },
@@ -232,7 +208,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'furniture', w: 5 },
     { kw: 'wayfair', w: 8 },
   ],
-
   'Subscriptions': [
     { kw: 'netflix', w: 10 },
     { kw: 'apple.com/bill', w: 10 },
@@ -248,7 +223,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'icloud', w: 8 },
     { kw: 'google storage', w: 8 },
   ],
-
   'Alcohol & Liquor': [
     { kw: 'lcbo', w: 10 },
     { kw: 'beer store', w: 10 },
@@ -258,13 +232,12 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'nickel brook brew', w: 10 },
     { kw: 'fairweather brew', w: 10 },
     { kw: 'brewery', w: 7 },
-    { kw: 'brewi', w: 5 },   // truncated "brewing"
+    { kw: 'brewi', w: 5 },
     { kw: 'brew ', w: 4 },
     { kw: 'wine ', w: 3 },
     { kw: 'liquor', w: 8 },
     { kw: 'distill', w: 6 },
   ],
-
   'Health & Pharmacy': [
     { kw: 'shoppers drug', w: 10 },
     { kw: 'rexall', w: 10 },
@@ -280,7 +253,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'physio', w: 6 },
     { kw: 'chiro', w: 6 },
   ],
-
   'Utilities': [
     { kw: 'wyse meter', w: 10 },
     { kw: 'enbridge', w: 10 },
@@ -297,7 +269,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'electric', w: 3 },
     { kw: 'utility', w: 5 },
   ],
-
   'Travel': [
     { kw: 'westjet', w: 10 },
     { kw: 'air canada', w: 10 },
@@ -314,7 +285,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'resort', w: 6 },
     { kw: 'hostel', w: 6 },
   ],
-
   'Entertainment': [
     { kw: 'massey hall', w: 10 },
     { kw: 'meridian hall', w: 10 },
@@ -333,17 +303,15 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'museum', w: 6 },
     { kw: 'gallery', w: 4 },
   ],
-
   'Pets': [
     { kw: 'pet valu', w: 10 },
     { kw: 'pet smart', w: 10 },
     { kw: 'petsmart', w: 10 },
-    { kw: 'ren\'s pets', w: 10 },
+    { kw: "ren's pets", w: 10 },
     { kw: 'global pet', w: 10 },
     { kw: 'veterinar', w: 8 },
     { kw: 'vet clinic', w: 8 },
   ],
-
   'Auto & Maintenance': [
     { kw: 'mechanical edge', w: 10 },
     { kw: 'auto ', w: 4 },
@@ -357,7 +325,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'car wash', w: 6 },
     { kw: 'collision', w: 6 },
   ],
-
   'Fees & Charges': [
     { kw: 'paymentus', w: 10 },
     { kw: 'service fee', w: 8 },
@@ -366,17 +333,15 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
     { kw: 'late fee', w: 10 },
     { kw: 'nsf', w: 8 },
   ],
-
   'Convenience Store': [
     { kw: 'oxxo', w: 8 },
     { kw: 'circle k', w: 10 },
     { kw: '7-eleven', w: 10 },
     { kw: 'couche-tard', w: 10 },
     { kw: 'hasty market', w: 10 },
-    { kw: 'mac\'s', w: 6 },
+    { kw: "mac's", w: 6 },
     { kw: 'variety', w: 3 },
   ],
-
   'Payment': [
     { kw: 'payment received', w: 15 },
     { kw: 'trsf from', w: 15 },
@@ -384,10 +349,6 @@ const KEYWORDS: Record<string, KeywordRule[]> = {
   ],
 };
 
-/**
- * Score a description against all categories.
- * Returns the category with the highest score, or 'Other' if no score > 0.
- */
 function scoreDescription(desc: string): { category: string; score: number } {
   const lower = desc.toLowerCase();
   let bestCategory = 'Other';
@@ -409,15 +370,13 @@ function scoreDescription(desc: string): { category: string; score: number } {
   return { category: bestCategory, score: bestScore };
 }
 
-export function categorizeTransaction(description: string): { category: string; confirmed: boolean } {
+export function categorizeTransaction(
+  description: string,
+  mappings: CategoryMapping[]
+): { category: string; confirmed: boolean } {
   // 1. Check user-saved mappings first (these are confirmed)
-  const mappings = db.prepare('SELECT merchant_pattern, category FROM category_mappings').all() as {
-    merchant_pattern: string;
-    category: string;
-  }[];
-
   for (const mapping of mappings) {
-    if (description.toLowerCase().includes(mapping.merchant_pattern.toLowerCase())) {
+    if (description.toLowerCase().includes(mapping.merchantPattern.toLowerCase())) {
       return { category: mapping.category, confirmed: true };
     }
   }
@@ -428,7 +387,7 @@ export function categorizeTransaction(description: string): { category: string; 
     return { category, confirmed: false };
   }
 
-  // 3. Foreign currency transactions - try scoring the merchant part, fallback to Travel
+  // 3. Foreign currency transactions
   const foreignMatch = description.match(/(?:MXN|USD|EUR|GBP)\s+[\d.]+@[\d.]+\s+(.*)/i);
   if (foreignMatch) {
     const { category: foreignCat, score: foreignScore } = scoreDescription(foreignMatch[1]);
@@ -439,10 +398,4 @@ export function categorizeTransaction(description: string): { category: string; 
   }
 
   return { category: 'Other', confirmed: false };
-}
-
-export function saveCategoryMapping(merchantPattern: string, category: string) {
-  db.prepare(
-    'INSERT INTO category_mappings (merchant_pattern, category) VALUES (?, ?) ON CONFLICT(merchant_pattern) DO UPDATE SET category = ?'
-  ).run(merchantPattern, category, category);
 }

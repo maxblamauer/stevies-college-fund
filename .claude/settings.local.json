@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm uninstall:*)",
+      "Bash(ls /Users/max/Documents/Projects/spending-tracker/*.db)"
+    ]
+  }
+}

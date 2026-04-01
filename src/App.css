@@ -730,3 +730,264 @@ tr:hover {
   font-size: 11px;
   margin-left: 1px;
 }
+
+/* ===== LOGIN ===== */
+.login-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.login-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 48px 40px;
+  text-align: center;
+  box-shadow: var(--shadow);
+  max-width: 400px;
+  width: 100%;
+}
+
+.login-card h1 {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.login-subtitle {
+  color: var(--text-muted);
+  font-size: 14px;
+  margin-bottom: 32px;
+}
+
+.google-signin-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 24px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+}
+
+.google-signin-btn:hover {
+  background: var(--bg-hover);
+}
+
+.google-signin-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.login-error {
+  color: var(--red);
+  font-size: 13px;
+  margin-top: 16px;
+}
+
+.auth-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  color: var(--text-muted);
+  font-size: 16px;
+}
+
+/* ===== USER MENU ===== */
+.user-menu-wrapper {
+  position: relative;
+}
+
+.user-menu-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: var(--radius);
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+
+.user-menu-btn:hover {
+  background: var(--bg-hover);
+}
+
+.user-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 199;
+}
+
+.user-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  min-width: 200px;
+  z-index: 200;
+  padding: 8px 0;
+}
+
+.user-menu-section {
+  padding: 8px 16px;
+}
+
+.user-menu-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.user-menu-value {
+  font-size: 14px;
+  color: var(--text);
+}
+
+.invite-code-btn {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.invite-code-btn:hover {
+  border-color: var(--accent);
+}
+
+.invite-code-text {
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: var(--text);
+}
+
+.invite-code-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.user-menu-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.user-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 16px;
+  border: none;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.user-menu-item:hover {
+  background: var(--bg-hover);
+}
+
+/* ===== HOUSEHOLD SETUP ===== */
+.household-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 48px 40px;
+  text-align: center;
+  box-shadow: var(--shadow);
+  max-width: 440px;
+  width: 100%;
+}
+
+.household-card h1 {
+  font-size: 24px;
+  margin-bottom: 8px;
+}
+
+.household-options {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.household-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: var(--radius);
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.household-option:hover {
+  background: var(--bg-hover);
+  border-color: var(--accent);
+}
+
+.household-option strong {
+  font-size: 15px;
+}
+
+.household-option span {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.household-input {
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--radius);
+  font-size: 15px;
+  margin-bottom: 16px;
+}
+
+.household-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.invite-code-input {
+  text-align: center;
+  font-family: 'SF Mono', 'Fira Code', monospace;
+  font-size: 20px;
+  letter-spacing: 4px;
+}
+
+.household-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+

@@ -1,13 +1,16 @@
 import { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-
-const API = '/api';
+import { collection, addDoc, getDocs, doc, query, where, writeBatch, Timestamp } from 'firebase/firestore';
+import { db } from '../firebase';
+import { parseBMOStatement } from '../lib/parser';
+import type { CategoryMapping } from '../lib/categorize';
 
 interface Props {
   onUploaded: () => void;
+  householdId: string;
 }
 
-export function Upload({ onUploaded }: Props) {
+export function Upload({ onUploaded, householdId }: Props) {
   const [status, setStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [fileName, setFileName] = useState('');
@@ -19,31 +22,72 @@ export function Upload({ onUploaded }: Props) {
       setFileName(files[0].name);
       setMessage('');
 
-      const formData = new FormData();
-      formData.append('file', files[0]);
-
       try {
-        const res = await fetch(`${API}/statements/upload`, {
-          method: 'POST',
-          body: formData,
-        });
-        const data = await res.json();
+        // Read file as Uint8Array
+        const buffer = await files[0].arrayBuffer();
+        const data = new Uint8Array(buffer);
 
-        if (!res.ok) {
+        // Load household's category mappings
+        const mappingsSnap = await getDocs(collection(db, 'households', householdId, 'categoryMappings'));
+        const mappings: CategoryMapping[] = mappingsSnap.docs.map((doc) => doc.data() as CategoryMapping);
+
+        // Parse the PDF
+        const parsed = await parseBMOStatement(data, mappings);
+
+        // Check for duplicate
+        const existingSnap = await getDocs(
+          query(
+            collection(db, 'households', householdId, 'statements'),
+            where('statementDate', '==', parsed.statementDate)
+          )
+        );
+        if (!existingSnap.empty) {
           setStatus('error');
-          setMessage(data.error || 'Upload failed');
+          setMessage('Statement already uploaded');
           return;
+        }
+        // Save statement
+        const stmtRef = await addDoc(collection(db, 'households', householdId, 'statements'), {
+          filename: files[0].name,
+          statementDate: parsed.statementDate,
+          periodStart: parsed.periodStart,
+          periodEnd: parsed.periodEnd,
+          totalBalance: parsed.totalBalance,
+          uploadedAt: Timestamp.now(),
+        });
+
+        // Save transactions in batches of 500 (Firestore limit)
+        const txnCol = collection(db, 'households', householdId, 'transactions');
+        for (let i = 0; i < parsed.transactions.length; i += 500) {
+          const batch = writeBatch(db);
+          const chunk = parsed.transactions.slice(i, i + 500);
+          for (const txn of chunk) {
+            const ref = doc(txnCol);
+            batch.set(ref, {
+              statementId: stmtRef.id,
+              transDate: txn.transDate,
+              postingDate: txn.postingDate,
+              description: txn.description,
+              amount: txn.amount,
+              isCredit: txn.isCredit,
+              cardholder: txn.cardholder,
+              category: txn.category,
+              confirmed: txn.confirmed,
+            });
+          }
+          await batch.commit();
         }
 
         setStatus('success');
-        setMessage(`${data.transactionCount} transactions imported`);
+        setMessage(`${parsed.transactions.length} transactions imported`);
         setTimeout(onUploaded, 800);
-      } catch {
+      } catch (err) {
+        console.error('Parse error:', err);
         setStatus('error');
-        setMessage('Failed to connect to server');
+        setMessage(err instanceof Error ? err.message : 'Failed to parse statement');
       }
     },
-    [onUploaded]
+    [onUploaded, householdId]
   );
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({

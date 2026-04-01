@@ -1,80 +1,133 @@
 import { useEffect, useState } from 'react';
+import { collection, getDocs, doc, updateDoc, query, where, addDoc, writeBatch, orderBy, QueryConstraint } from 'firebase/firestore';
+import { db } from '../firebase';
 import { CATEGORIES } from '../types';
 
-const API = '/api';
-
 interface Transaction {
-  id: number;
-  trans_date: string;
-  posting_date: string;
+  id: string;
+  transDate: string;
+  postingDate: string;
   description: string;
   amount: number;
-  is_credit: number;
+  isCredit: boolean;
   cardholder: string;
   category: string;
-  confirmed: number;
+  confirmed: boolean;
 }
 
 interface Props {
   onUpdate: () => void;
   initialCategory?: string;
+  householdId: string;
 }
 
-export function TransactionList({ onUpdate, initialCategory = '' }: Props) {
+export function TransactionList({ onUpdate, initialCategory = '', householdId }: Props) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filter, setFilter] = useState({ category: initialCategory, cardholder: '', confirmed: '' });
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editCategory, setEditCategory] = useState('');
 
   const fetchTransactions = async () => {
-    const params = new URLSearchParams();
-    if (filter.category) params.set('category', filter.category);
-    if (filter.cardholder) params.set('cardholder', filter.cardholder);
-    if (filter.confirmed) params.set('confirmed', filter.confirmed);
-    const res = await fetch(`${API}/transactions?${params}`);
-    setTransactions(await res.json());
+    const constraints: QueryConstraint[] = [orderBy('transDate', 'desc')];
+    if (filter.category) constraints.push(where('category', '==', filter.category));
+    if (filter.cardholder) constraints.push(where('cardholder', '==', filter.cardholder));
+    if (filter.confirmed === 'true') constraints.push(where('confirmed', '==', true));
+    if (filter.confirmed === 'false') constraints.push(where('confirmed', '==', false));
+
+    const q = query(collection(db, 'households', householdId, 'transactions'), ...constraints);
+    const snap = await getDocs(q);
+    setTransactions(
+      snap.docs.map((d) => ({ id: d.id, ...d.data() } as Transaction))
+    );
   };
 
   useEffect(() => {
     fetchTransactions();
   }, [filter]);
 
-  const updateCategory = async (id: number, description: string) => {
-    // Extract a merchant pattern from the description
+  const updateCategory = async (id: string, description: string) => {
     const pattern = extractMerchantPattern(description);
-    await fetch(`${API}/transactions/${id}/category`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category: editCategory, merchantPattern: pattern }),
-    });
+    const txnRef = doc(db, 'households', householdId, 'transactions', id);
+    await updateDoc(txnRef, { category: editCategory, confirmed: true });
+
+    // Save the mapping
+    if (pattern) {
+      await saveMerchantMapping(pattern, editCategory);
+      // Update other unconfirmed transactions with same pattern
+      await applyMappingToUnconfirmed(pattern, editCategory);
+    }
+
     setEditingId(null);
     fetchTransactions();
     onUpdate();
   };
 
-  const confirmCategory = async (id: number, description: string) => {
+  const confirmCategory = async (id: string, description: string) => {
     const pattern = extractMerchantPattern(description);
-    await fetch(`${API}/transactions/${id}/confirm`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ merchantPattern: pattern }),
-    });
+    const txnRef = doc(db, 'households', householdId, 'transactions', id);
+    const txn = transactions.find((t) => t.id === id);
+    await updateDoc(txnRef, { confirmed: true });
+
+    if (pattern && txn) {
+      await saveMerchantMapping(pattern, txn.category);
+    }
+
     fetchTransactions();
     onUpdate();
   };
 
   const confirmAll = async () => {
-    await fetch(`${API}/transactions/confirm-all`, { method: 'POST' });
+    const q = query(
+      collection(db, 'households', householdId, 'transactions'),
+      where('confirmed', '==', false)
+    );
+    const snap = await getDocs(q);
+    const batch = writeBatch(db);
+    snap.docs.forEach((d) => batch.update(d.ref, { confirmed: true }));
+    await batch.commit();
     fetchTransactions();
     onUpdate();
   };
 
+  const saveMerchantMapping = async (pattern: string, category: string) => {
+    // Check if mapping already exists
+    const q = query(
+      collection(db, 'households', householdId, 'categoryMappings'),
+      where('merchantPattern', '==', pattern)
+    );
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      await updateDoc(snap.docs[0].ref, { category });
+    } else {
+      await addDoc(collection(db, 'households', householdId, 'categoryMappings'), {
+        merchantPattern: pattern,
+        category,
+      });
+    }
+  };
+
+  const applyMappingToUnconfirmed = async (pattern: string, category: string) => {
+    const q = query(
+      collection(db, 'households', householdId, 'transactions'),
+      where('confirmed', '==', false)
+    );
+    const snap = await getDocs(q);
+    const batch = writeBatch(db);
+    snap.docs.forEach((d) => {
+      const data = d.data();
+      if (data.description.toLowerCase().includes(pattern.toLowerCase())) {
+        batch.update(d.ref, { category, confirmed: true });
+      }
+    });
+    await batch.commit();
+  };
+
   const unconfirmedCount = transactions.filter((t) => !t.confirmed).length;
   const totalAmount = transactions
-    .filter((t) => !t.is_credit)
+    .filter((t) => !t.isCredit)
     .reduce((sum, t) => sum + t.amount, 0);
   const creditAmount = transactions
-    .filter((t) => t.is_credit)
+    .filter((t) => t.isCredit)
     .reduce((sum, t) => sum + t.amount, 0);
 
   return (
@@ -86,7 +139,7 @@ export function TransactionList({ onUpdate, initialCategory = '' }: Props) {
           </button>
           <span className="category-filter-title">{filter.category}</span>
           <span className="category-filter-summary">
-            {transactions.filter((t) => !t.is_credit).length} charges totalling ${totalAmount.toFixed(2)}
+            {transactions.filter((t) => !t.isCredit).length} charges totalling ${totalAmount.toFixed(2)}
             {creditAmount > 0 && <> &middot; ${creditAmount.toFixed(2)} in credits</>}
           </span>
         </div>
@@ -133,14 +186,14 @@ export function TransactionList({ onUpdate, initialCategory = '' }: Props) {
           </thead>
           <tbody>
             {transactions.map((txn) => (
-              <tr key={txn.id} className={txn.is_credit ? 'credit-row' : ''}>
-                <td className="date-cell">{txn.trans_date}</td>
+              <tr key={txn.id} className={txn.isCredit ? 'credit-row' : ''}>
+                <td className="date-cell">{txn.transDate}</td>
                 <td className="desc-cell" title={txn.description}>
                   {txn.description}
                 </td>
                 <td>{txn.cardholder.split(' ')[0]}</td>
-                <td className={`amount-cell ${txn.is_credit ? 'credit' : 'debit'}`}>
-                  {txn.is_credit ? '-' : ''}${txn.amount.toFixed(2)}
+                <td className={`amount-cell ${txn.isCredit ? 'credit' : 'debit'}`}>
+                  {txn.isCredit ? '-' : ''}${txn.amount.toFixed(2)}
                 </td>
                 <td>
                   {editingId === txn.id ? (
@@ -208,7 +261,6 @@ export function TransactionList({ onUpdate, initialCategory = '' }: Props) {
 }
 
 function extractMerchantPattern(description: string): string {
-  // Try to get a clean merchant name for pattern matching
   let cleaned = description
     .replace(/\s+(ON|BC|AB|QC|MB|SK|NB|NS|PE|NL|NT|YT|NU)\s*$/i, '')
     .replace(/\s+#\d+/g, '')
@@ -217,13 +269,11 @@ function extractMerchantPattern(description: string): string {
     .replace(/\s{2,}/g, ' ')
     .trim();
 
-  // For foreign currency transactions, extract merchant after the rate
   const foreignMatch = description.match(/(?:MXN|USD|EUR|GBP)\s+[\d.]+@[\d.]+\s+(.*)/i);
   if (foreignMatch) {
     cleaned = foreignMatch[1].replace(/\s+(ON|BC|AB|QC)\s*$/i, '').replace(/\s+\d+$/, '').trim();
   }
 
-  // Take the first meaningful words (usually the merchant name)
   const words = cleaned.split(/\s+/).slice(0, 3);
   return words.join(' ').toLowerCase();
 }

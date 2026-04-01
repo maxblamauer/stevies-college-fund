@@ -1,27 +1,32 @@
 import { useEffect, useState } from 'react';
-
-const API = '/api';
+import { collection, getDocs, deleteDoc, doc, orderBy, query } from 'firebase/firestore';
+import { db } from '../firebase';
 
 interface Mapping {
-  id: number;
-  merchant_pattern: string;
+  id: string;
+  merchantPattern: string;
   category: string;
 }
 
-export function MappingsManager() {
+interface Props {
+  householdId: string;
+}
+
+export function MappingsManager({ householdId }: Props) {
   const [mappings, setMappings] = useState<Mapping[]>([]);
 
   const fetchMappings = async () => {
-    const res = await fetch(`${API}/category-mappings`);
-    setMappings(await res.json());
+    const q = query(collection(db, 'households', householdId, 'categoryMappings'), orderBy('merchantPattern'));
+    const snap = await getDocs(q);
+    setMappings(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Mapping)));
   };
 
   useEffect(() => {
     fetchMappings();
   }, []);
 
-  const deleteMapping = async (id: number) => {
-    await fetch(`${API}/category-mappings/${id}`, { method: 'DELETE' });
+  const deleteMapping = async (id: string) => {
+    await deleteDoc(doc(db, 'households', householdId, 'categoryMappings', id));
     fetchMappings();
   };
 
@@ -50,7 +55,7 @@ export function MappingsManager() {
           <tbody>
             {mappings.map((m) => (
               <tr key={m.id}>
-                <td><code>{m.merchant_pattern}</code></td>
+                <td><code>{m.merchantPattern}</code></td>
                 <td>{m.category}</td>
                 <td>
                   <button className="btn btn-xs btn-danger" onClick={() => deleteMapping(m.id)}>

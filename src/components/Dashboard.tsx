@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveBar } from '@nivo/bar';
-
-const API = '/api';
+import { collection, getDocs, query, where, deleteDoc, doc, orderBy } from 'firebase/firestore';
+import { db } from '../firebase';
 
 const CATEGORY_COLORS: Record<string, string> = {
   'Groceries':            '#4da36a',
@@ -34,12 +34,13 @@ function getColor(category: string): string {
 }
 
 interface CategoryStat { category: string; total: number; count: number; }
-interface StatementInfo { id: number; statement_date: string; period_start: string; period_end: string; total_balance: number; filename: string; }
-interface PerStatementStat { statement_id: number; statement_date: string; period_start: string; period_end: string; category: string; total: number; }
+interface StatementInfo { id: string; statementDate: string; periodStart: string; periodEnd: string; totalBalance: number; filename: string; }
+interface TransactionDoc { statementId: string; transDate: string; amount: number; isCredit: boolean; cardholder: string; category: string; }
 
 interface Props {
   onCategoryClick: (category: string) => void;
   theme: 'dark' | 'light';
+  householdId: string;
 }
 
 function fmtMoney(n: number): string {
@@ -54,7 +55,6 @@ function formatStmtDate(dateStr: string): string {
 
 const PIE_THRESHOLD = 3.5;
 
-// Sparkline stat card component
 function SparkCard({ label, value, change, subtitle, invertColor }: {
   label: string;
   value: string;
@@ -84,34 +84,52 @@ function SparkCard({ label, value, change, subtitle, invertColor }: {
   );
 }
 
-export function Dashboard({ onCategoryClick, theme }: Props) {
+export function Dashboard({ onCategoryClick, theme, householdId }: Props) {
   const [byCategory, setByCategory] = useState<CategoryStat[]>([]);
-  const [perStatement, setPerStatement] = useState<PerStatementStat[]>([]);
   const [statements, setStatements] = useState<StatementInfo[]>([]);
+  const [allTransactions, setAllTransactions] = useState<TransactionDoc[]>([]);
   const [cardholder, setCardholder] = useState('');
   const [selectedStatement, setSelectedStatement] = useState('');
-  const [dailySpending, setDailySpending] = useState<{ trans_date: string; total: number; count: number }[]>([]);
 
   useEffect(() => {
-    const params = new URLSearchParams();
-    if (cardholder) params.set('cardholder', cardholder);
-    if (selectedStatement) params.set('statementId', selectedStatement);
-
-    const globalParams = new URLSearchParams();
-    if (cardholder) globalParams.set('cardholder', cardholder);
-
-    Promise.all([
-      fetch(`${API}/stats/by-category?${params}`).then((r) => r.json()),
-      fetch(`${API}/stats/per-statement?${globalParams}`).then((r) => r.json()),
-      fetch(`${API}/statements`).then((r) => r.json()),
-      selectedStatement ? fetch(`${API}/stats/daily?${params}`).then((r) => r.json()) : Promise.resolve([]),
-    ]).then(([cats, perStmt, stmts, daily]) => {
-      setByCategory(cats);
-      setPerStatement(perStmt);
+    const load = async () => {
+      // Load statements
+      const stmtSnap = await getDocs(
+        query(collection(db, 'households', householdId, 'statements'), orderBy('statementDate', 'desc'))
+      );
+      const stmts = stmtSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StatementInfo));
       setStatements(stmts);
-      setDailySpending(daily);
-    });
-  }, [cardholder, selectedStatement]);
+
+      // Load all transactions (debits only for stats)
+      const txnSnap = await getDocs(collection(db, 'households', householdId, 'transactions'));
+      const txns = txnSnap.docs.map((d) => d.data() as TransactionDoc);
+      setAllTransactions(txns);
+    };
+    load();
+  }, [householdId]);
+
+  // Compute stats from loaded data with filters applied
+  const filteredTxns = allTransactions.filter((t) => {
+    if (t.isCredit) return false;
+    if (cardholder && t.cardholder !== cardholder) return false;
+    if (selectedStatement && t.statementId !== selectedStatement) return false;
+    return true;
+  });
+
+  // Recompute byCategory whenever filters change
+  useEffect(() => {
+    const catMap = new Map<string, { total: number; count: number }>();
+    for (const t of filteredTxns) {
+      const existing = catMap.get(t.category) || { total: 0, count: 0 };
+      existing.total += t.amount;
+      existing.count++;
+      catMap.set(t.category, existing);
+    }
+    const cats = Array.from(catMap.entries())
+      .map(([category, { total, count }]) => ({ category, total, count }))
+      .sort((a, b) => b.total - a.total);
+    setByCategory(cats);
+  }, [allTransactions, cardholder, selectedStatement]);
 
   const totalSpending = byCategory.reduce((sum, c) => sum + c.total, 0);
 
@@ -128,39 +146,50 @@ export function Dashboard({ onCategoryClick, theme }: Props) {
       otherCount++;
     }
   }
-  // Collect the names of grouped small categories
-  const otherNames: string[] = [];
-  for (const c of byCategory) {
-    if ((c.total / totalSpending) * 100 < PIE_THRESHOLD) {
-      otherNames.push(c.category);
-    }
-  }
   if (otherTotal > 0) {
     const label = `${otherCount} smaller categories`;
     mainSlices.push({ id: '__grouped__', label, value: Math.round(otherTotal * 100) / 100, color: getColor('Other') });
   }
 
   // Statement totals for line chart
-  const stmtMap = Object.fromEntries(statements.map((s) => [s.id, s]));
-  const sortedStmts = [...statements].sort((a, b) => a.statement_date.localeCompare(b.statement_date));
+  const sortedStmts = [...statements].sort((a, b) => a.statementDate.localeCompare(b.statementDate));
   const stmtTotals = sortedStmts.map((s) => {
-    const total = perStatement
-      .filter((ps) => ps.statement_id === s.id)
-      .reduce((sum, ps) => sum + ps.total, 0);
-    return { id: s.id, label: formatStmtDate(s.statement_date), total: Math.round(total * 100) / 100 };
+    const total = allTransactions
+      .filter((t) => t.statementId === s.id && !t.isCredit && (!cardholder || t.cardholder === cardholder))
+      .reduce((sum, t) => sum + t.amount, 0);
+    return { id: s.id, label: formatStmtDate(s.statementDate), total: Math.round(total * 100) / 100 };
   });
 
-
-  // Compute trend data for sparkline stat cards
   const latestTotal = stmtTotals.length > 0 ? stmtTotals[stmtTotals.length - 1].total : 0;
   const prevTotal = stmtTotals.length > 1 ? stmtTotals[stmtTotals.length - 2].total : 0;
   const spendingChange = stmtTotals.length > 1 ? ((latestTotal - prevTotal) / prevTotal) * 100 : 0;
   const avgSpending = stmtTotals.length > 0 ? stmtTotals.reduce((s, t) => s + t.total, 0) / stmtTotals.length : 0;
 
+  // Daily spending for single statement view
+  const dailySpending = selectedStatement
+    ? Object.values(
+        filteredTxns
+          .filter((t) => t.statementId === selectedStatement)
+          .reduce<Record<string, { transDate: string; total: number; count: number }>>((acc, t) => {
+            if (!acc[t.transDate]) acc[t.transDate] = { transDate: t.transDate, total: 0, count: 0 };
+            acc[t.transDate].total += t.amount;
+            acc[t.transDate].count++;
+            return acc;
+          }, {})
+      ).sort((a, b) => a.transDate.localeCompare(b.transDate))
+    : [];
 
-  const deleteStatement = async (id: number) => {
+  const deleteStatement = async (id: string) => {
     if (!confirm('Delete this statement and all its transactions?')) return;
-    await fetch(`${API}/statements/${id}`, { method: 'DELETE' });
+    // Delete transactions for this statement
+    const txnSnap = await getDocs(
+      query(collection(db, 'households', householdId, 'transactions'), where('statementId', '==', id))
+    );
+    for (const d of txnSnap.docs) {
+      await deleteDoc(d.ref);
+    }
+    // Delete statement
+    await deleteDoc(doc(db, 'households', householdId, 'statements', id));
     window.location.reload();
   };
 
@@ -194,7 +223,7 @@ export function Dashboard({ onCategoryClick, theme }: Props) {
           <option value="">All Statements</option>
           {statements.map((s) => (
             <option key={s.id} value={s.id}>
-              {formatStmtDate(s.statement_date)} ({s.period_start} to {s.period_end})
+              {formatStmtDate(s.statementDate)} ({s.periodStart} to {s.periodEnd})
             </option>
           ))}
         </select>
@@ -283,14 +312,13 @@ export function Dashboard({ onCategoryClick, theme }: Props) {
               </div>
             )}
 
-            {/* Daily spending chart for single statement view */}
             {selectedStatement && dailySpending.length > 0 && (
               <div className="chart-card">
                 <h3>Daily Spending</h3>
                 <div style={{ height: 340 }}>
                   <ResponsiveBar
                     data={dailySpending.map((d) => ({
-                      day: d.trans_date.slice(5), // "02-14"
+                      day: d.transDate.slice(5),
                       amount: Math.round(d.total * 100) / 100,
                     }))}
                     keys={['amount']}
@@ -395,9 +423,9 @@ export function Dashboard({ onCategoryClick, theme }: Props) {
               <tbody>
                 {statements.map((s) => (
                   <tr key={s.id}>
-                    <td>{formatStmtDate(s.statement_date)}</td>
-                    <td>{s.period_start} to {s.period_end}</td>
-                    <td>{fmtMoney(s.total_balance)}</td>
+                    <td>{formatStmtDate(s.statementDate)}</td>
+                    <td>{s.periodStart} to {s.periodEnd}</td>
+                    <td>{fmtMoney(s.totalBalance)}</td>
                     <td>{s.filename}</td>
                     <td><button className="btn btn-xs btn-danger" onClick={() => deleteStatement(s.id)}>Delete</button></td>
                   </tr>
