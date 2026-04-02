@@ -146,28 +146,71 @@ function App() {
                 <div className="user-menu-backdrop" onClick={() => setMenuOpen(false)} />
                 <div className="user-menu">
                   {householdName && (
-                    <div className="user-menu-item user-menu-info">
-                      {householdName}
+                    <div className="user-menu-header">
+                      <div className="user-menu-household-row">
+                        <span className="user-menu-item-icon">
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M3 10.5 12 3l9 7.5" />
+                            <path d="M5 9.5V21h14V9.5" />
+                          </svg>
+                        </span>
+                        <span className="user-menu-household-name">{householdName}</span>
+                      </div>
                     </div>
                   )}
                   {inviteCode && (
                     <button
-                      className="user-menu-item"
+                      className="user-menu-item user-menu-action"
                       onClick={() => {
                         navigator.clipboard.writeText(inviteCode);
                         setCodeCopied(true);
                         setTimeout(() => setCodeCopied(false), 2000);
                       }}
                     >
-                      Invite: <span className="invite-code-inline">{inviteCode}</span>
+                      <span className="user-menu-item-icon">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <rect x="9" y="9" width="13" height="13" rx="2" />
+                          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                        </svg>
+                      </span>
+                      <span className="user-menu-item-label">
+                        Invite code: <span className="invite-code-inline">{inviteCode}</span>
+                      </span>
                       <span className="invite-code-hint">{codeCopied ? 'Copied!' : ''}</span>
                     </button>
                   )}
                   <div className="user-menu-divider" />
-                  <button className="user-menu-item" onClick={() => { setTheme(theme === 'dark' ? 'light' : 'dark'); }}>
-                    {theme === 'dark' ? 'Light mode' : 'Dark mode'}
+                  <button
+                    className="user-menu-item user-menu-action"
+                    onClick={() => {
+                      setTheme(theme === 'dark' ? 'light' : 'dark');
+                      setMenuOpen(false);
+                    }}
+                  >
+                    <span className="user-menu-item-icon">
+                      {theme === 'dark' ? (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <circle cx="12" cy="12" r="5" />
+                          <path d="M12 1v2.2M12 20.8V23M4.22 4.22l1.56 1.56M18.22 18.22l1.56 1.56M1 12h2.2M20.8 12H23M4.22 19.78l1.56-1.56M18.22 5.78l1.56-1.56" />
+                        </svg>
+                      ) : (
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 3a7.5 7.5 0 1 0 9 9A9 9 0 1 1 12 3Z" />
+                        </svg>
+                      )}
+                    </span>
+                    <span className="user-menu-item-label">{theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}</span>
                   </button>
-                  <button className="user-menu-item" onClick={handleLogout}>Sign out</button>
+                  <button className="user-menu-item user-menu-action user-menu-danger" onClick={handleLogout}>
+                    <span className="user-menu-item-icon">
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                        <path d="m16 17 5-5-5-5" />
+                        <path d="M21 12H9" />
+                      </svg>
+                    </span>
+                    <span className="user-menu-item-label">Sign out</span>
+                  </button>
                 </div>
               </>
             )}

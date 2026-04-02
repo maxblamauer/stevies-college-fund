@@ -2,8 +2,10 @@ import { useEffect, useState } from 'react';
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveLine } from '@nivo/line';
 import { ResponsiveBar } from '@nivo/bar';
-import { collection, getDocs, query, where, deleteDoc, doc, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
+import { SparkCard } from './ui/SparkCard';
+import { FilterSelect } from './ui/FilterSelect';
 
 const CATEGORY_COLORS: Record<string, string> = {
   'Groceries':            '#4da36a',
@@ -58,40 +60,12 @@ function formatStmtDate(dateStr: string): string {
 
 const PIE_THRESHOLD = 3.5;
 
-function SparkCard({ label, value, change, subtitle, invertColor }: {
-  label: string;
-  value: string;
-  change?: number;
-  subtitle?: string;
-  invertColor?: boolean;
-}) {
-  const changeIsGood = invertColor ? (change ?? 0) < 0 : (change ?? 0) > 0;
-  const changeColor = change !== undefined
-    ? (changeIsGood ? 'var(--green)' : 'var(--red)')
-    : undefined;
-
-  return (
-    <div className="spark-card">
-      <div className="spark-card-label">{label}</div>
-      <div className="spark-card-value">{value}</div>
-      {change !== undefined && (
-        <div className="spark-card-change" style={{ color: changeColor }}>
-          <span className="has-tooltip">
-            {change < 0 ? '\u2193' : '\u2191'} {Math.abs(change).toFixed(1)}%
-            <span className="tooltip">Compared to previous statement</span>
-          </span>
-        </div>
-      )}
-      {subtitle && <div className="spark-card-subtitle">{subtitle}</div>}
-    </div>
-  );
-}
-
 export function Dashboard({ onCategoryClick, theme, householdId, selectedStatement, onStatementChange, cardholder, onCardholderChange }: Props) {
   const [byCategory, setByCategory] = useState<CategoryStat[]>([]);
   const [statements, setStatements] = useState<StatementInfo[]>([]);
   const [allTransactions, setAllTransactions] = useState<TransactionDoc[]>([]);
   const [loading, setLoading] = useState(true);
+  const [trendHoverX, setTrendHoverX] = useState<number | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -167,6 +141,13 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
   const latestTotal = stmtTotals.length > 0 ? stmtTotals[stmtTotals.length - 1].total : 0;
   const prevTotal = stmtTotals.length > 1 ? stmtTotals[stmtTotals.length - 2].total : 0;
   const spendingChange = stmtTotals.length > 1 ? ((latestTotal - prevTotal) / prevTotal) * 100 : 0;
+  const selectedStmtIdx = selectedStatement ? stmtTotals.findIndex((s) => s.id === selectedStatement) : -1;
+  const selectedStmtTotal = selectedStmtIdx >= 0 ? stmtTotals[selectedStmtIdx].total : 0;
+  const selectedPrevTotal = selectedStmtIdx > 0 ? stmtTotals[selectedStmtIdx - 1].total : 0;
+  const selectedSpendingChange =
+    selectedStmtIdx > 0 && selectedPrevTotal > 0
+      ? ((selectedStmtTotal - selectedPrevTotal) / selectedPrevTotal) * 100
+      : undefined;
   const avgSpending = stmtTotals.length > 0 ? stmtTotals.reduce((s, t) => s + t.total, 0) / stmtTotals.length : 0;
 
   // Daily spending for single statement view
@@ -182,20 +163,6 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
           }, {})
       ).sort((a, b) => a.transDate.localeCompare(b.transDate))
     : [];
-
-  const deleteStatement = async (id: string) => {
-    if (!confirm('Delete this statement and all its transactions?')) return;
-    // Delete transactions for this statement
-    const txnSnap = await getDocs(
-      query(collection(db, 'households', householdId, 'transactions'), where('statementId', '==', id))
-    );
-    for (const d of txnSnap.docs) {
-      await deleteDoc(d.ref);
-    }
-    // Delete statement
-    await deleteDoc(doc(db, 'households', householdId, 'statements', id));
-    window.location.reload();
-  };
 
   const isDark = theme === 'dark';
 
@@ -218,7 +185,12 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
       legend: { text: { fill: isDark ? '#999999' : '#6b7280', fontSize: 11, fontFamily: "'Inter', sans-serif" } },
     },
     labels: { text: { fill: '#ffffff', fontSize: 11, fontWeight: 700, fontFamily: "'Inter', sans-serif" } },
-    crosshair: { line: { stroke: 'transparent', strokeWidth: 0 } },
+    crosshair: {
+      line: {
+        stroke: 'transparent',
+        strokeWidth: 0,
+      },
+    },
   };
 
   // For bar chart x-axis: show every Nth label if there are too many
@@ -231,27 +203,26 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
     <div className="dashboard">
       <div className="dashboard-top-bar">
         <div className="dashboard-controls">
-          <select
-            className="filter-pill"
+          <FilterSelect
             value={selectedStatement}
-            onChange={(e) => onStatementChange(e.target.value)}
-          >
-            <option value="">All Statements</option>
-            {statements.map((s) => (
-              <option key={s.id} value={s.id}>
-                {formatStmtDate(s.statementDate)} ({s.periodStart} to {s.periodEnd})
-              </option>
-            ))}
-          </select>
-          <select
-            className="filter-pill"
+            onChange={onStatementChange}
+            options={[
+              { value: '', label: 'All Statements' },
+              ...statements.map((s) => ({
+                value: s.id,
+                label: `${formatStmtDate(s.statementDate)} (${s.periodStart} to ${s.periodEnd})`,
+              })),
+            ]}
+          />
+          <FilterSelect
             value={cardholder}
-            onChange={(e) => onCardholderChange(e.target.value)}
-          >
-            <option value="">All Cardholders</option>
-            <option value="Max Blamauer">Max</option>
-            <option value="Kathryn Peddar">Kathryn</option>
-          </select>
+            onChange={onCardholderChange}
+            options={[
+              { value: '', label: 'All Cardholders' },
+              { value: 'Max Blamauer', label: 'Max' },
+              { value: 'Kathryn Peddar', label: 'Kathryn' },
+            ]}
+          />
         </div>
       </div>
 
@@ -293,16 +264,15 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
             <SparkCard
               label={selectedStatement ? 'Statement Spending' : 'Total Spending'}
               value={fmtMoney(totalSpending)}
-              change={!selectedStatement && stmtTotals.length > 1 ? spendingChange : undefined}
-              invertColor
             />
             <SparkCard
               label="Latest Statement"
               value={stmtTotals.length > 0 ? fmtMoney(latestTotal) : '--'}
-              subtitle={stmtTotals.length > 0 ? stmtTotals[stmtTotals.length - 1].label : undefined}
+              change={selectedStatement ? selectedSpendingChange : (stmtTotals.length > 1 ? spendingChange : undefined)}
+              invertColor
             />
             <SparkCard
-              label="Avg / Statement"
+              label="Average"
               value={fmtMoney(avgSpending)}
               subtitle={`across ${statements.length} statement${statements.length !== 1 ? 's' : ''}`}
             />
@@ -326,7 +296,15 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
             {!selectedStatement && stmtTotals.length >= 2 && (
               <div className="chart-card">
                 <h3>Spending Trend</h3>
-                <div style={{ height: 340 }}>
+                <div
+                  className="trend-chart-wrap"
+                  style={{ height: 340 }}
+                  onMouseMove={(e) => {
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setTrendHoverX(e.clientX - rect.left);
+                  }}
+                  onMouseLeave={() => setTrendHoverX(null)}
+                >
                   <ResponsiveLine
                     data={[{
                       id: 'Spending',
@@ -344,6 +322,8 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
                     gridYValues={5}
                     enableGridX={false}
                     enablePoints={false}
+                    enableSlices="x"
+                    enableCrosshair={false}
                     enableArea={true}
                     areaBaselineValue={0}
                     areaOpacity={1}
@@ -357,12 +337,15 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
                     }]}
                     fill={[{ match: '*', id: 'areaGradient' }]}
                     useMesh={true}
-                    tooltip={({ point }) => (
+                    sliceTooltip={({ slice }) => (
                       <div className="nivo-tip">
-                        {point.data.xFormatted}: <strong>{fmtMoney(point.data.y as number)}</strong>
+                        {String(slice.points[0].data.xFormatted)}: <strong>{fmtMoney(Number(slice.points[0].data.y))}</strong>
                       </div>
                     )}
                   />
+                  {trendHoverX !== null && (
+                    <div className="trend-hover-line" style={{ left: `${trendHoverX}px` }} />
+                  )}
                 </div>
               </div>
             )}
@@ -405,7 +388,7 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
 
             <div className="chart-card">
               <h3>{selectedStatement ? 'Category Split' : 'Spending by Category'}</h3>
-              <div style={{ height: 300 }}>
+              <div className="pie-chart-wrap">
                 <ResponsivePie
                   data={mainSlices}
                   margin={{ top: 15, right: 15, bottom: 15, left: 15 }}
@@ -474,25 +457,6 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
             </div>
           </div>
 
-          <div className="statements-list">
-            <h3>Uploaded Statements</h3>
-            <table className="statements-table">
-              <thead>
-                <tr><th>Date</th><th>Period</th><th>Balance</th><th>File</th><th></th></tr>
-              </thead>
-              <tbody>
-                {statements.map((s) => (
-                  <tr key={s.id}>
-                    <td>{formatStmtDate(s.statementDate)}</td>
-                    <td>{s.periodStart} to {s.periodEnd}</td>
-                    <td>{fmtMoney(s.totalBalance)}</td>
-                    <td>{s.filename}</td>
-                    <td><button className="btn btn-xs btn-danger" onClick={() => deleteStatement(s.id)}>Delete</button></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
         </>
       )}
     </div>

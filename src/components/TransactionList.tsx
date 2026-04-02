@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react';
 import { collection, getDocs, doc, updateDoc, query, where, addDoc, writeBatch, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CATEGORIES } from '../types';
+import { SparkCard } from './ui/SparkCard';
+import { FilterSelect } from './ui/FilterSelect';
 
 interface Transaction {
   id: string;
@@ -165,75 +167,109 @@ export function TransactionList({ onUpdate, initialCategory = '', initialStateme
     .filter((t) => t.isCredit && t.category !== 'Payment')
     .reduce((sum, t) => sum + t.amount, 0);
 
+  const matchesNonStatementFilters = (t: Transaction) => {
+    if (filter.category && t.category !== filter.category) return false;
+    if (filter.cardholder && t.cardholder !== filter.cardholder) return false;
+    if (filter.confirmed === 'true' && !t.confirmed) return false;
+    if (filter.confirmed === 'false' && t.confirmed) return false;
+    return true;
+  };
+
+  const currentStatementSpending = filter.statement
+    ? allTransactions
+        .filter((t) => t.statementId === filter.statement && matchesNonStatementFilters(t) && !t.isCredit)
+        .reduce((sum, t) => sum + t.amount, 0)
+    : totalAmount;
+
+  const prevStatement = (() => {
+    if (!filter.statement || statements.length < 2) return null;
+    const currentIdx = statements.findIndex((s) => s.id === filter.statement);
+    if (currentIdx < 0 || currentIdx >= statements.length - 1) return null;
+    return statements[currentIdx + 1];
+  })();
+
+  const prevStatementSpending = (() => {
+    if (!prevStatement) return null;
+    return allTransactions
+      .filter((t) => t.statementId === prevStatement.id && matchesNonStatementFilters(t) && !t.isCredit)
+      .reduce((sum, t) => sum + t.amount, 0);
+  })();
+
+  const trendDelta = prevStatementSpending !== null ? currentStatementSpending - prevStatementSpending : 0;
+  const trendPct = prevStatementSpending !== null && prevStatementSpending > 0
+    ? (trendDelta / prevStatementSpending) * 100
+    : 0;
 
   return (
     <div className="transactions-page">
+    <div className="filters transactions-filters-top">
+        <FilterSelect
+          value={filter.statement}
+          onChange={(value) => setFilter({ ...filter, statement: value })}
+          options={[
+            { value: '', label: 'All Statements' },
+            ...statements.map((s) => ({
+              value: s.id,
+              label: `${formatStmtDate(s.statementDate)} (${s.periodStart} to ${s.periodEnd})`,
+            })),
+          ]}
+        />
+        <FilterSelect
+          value={filter.category}
+          onChange={(value) => setFilter({ ...filter, category: value })}
+          options={[
+            { value: '', label: 'All Categories' },
+            ...CATEGORIES.map((c) => ({ value: c, label: c })),
+          ]}
+        />
+        <FilterSelect
+          value={filter.cardholder}
+          onChange={(value) => setFilter({ ...filter, cardholder: value })}
+          options={[
+            { value: '', label: 'All Cardholders' },
+            { value: 'Max Blamauer', label: 'Max' },
+            { value: 'Kathryn Peddar', label: 'Kathryn' },
+          ]}
+        />
+        <FilterSelect
+          value={filter.confirmed}
+          onChange={(value) => setFilter({ ...filter, confirmed: value })}
+          options={[
+            { value: '', label: 'All Status' },
+            { value: 'false', label: 'Unconfirmed' },
+            { value: 'true', label: 'Confirmed' },
+          ]}
+        />
+        {unconfirmedCount > 0 && (
+          <button className="btn btn-sm" onClick={confirmAll}>
+            Confirm All ({unconfirmedCount})
+          </button>
+        )}
+      </div>
       <div className="transactions-toolbar">
-        <div className="txn-stats">
-          <div className="spark-card has-tooltip">
-            <div className="spark-card-label">Charges</div>
-            <div className="spark-card-value">{transactions.filter((t) => !t.isCredit).length}</div>
-            <span className="tooltip">Number of transactions</span>
-          </div>
-          <div className="spark-card has-tooltip">
-            <div className="spark-card-label">Total Spending</div>
-            <div className="spark-card-value">{totalAmount.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })}</div>
-            <span className="tooltip">Total spending amount</span>
-          </div>
-          <div className="spark-card has-tooltip">
-            <div className="spark-card-label">Credits</div>
-            <div className="spark-card-value" style={{ color: creditAmount > 0 ? 'var(--green)' : undefined }}>
-              {creditAmount > 0 ? `-${creditAmount.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })}` : '$0.00'}
-            </div>
-            <span className="tooltip">Refunds and credits</span>
-          </div>
-        </div>
-        <div className="filters">
-          <select
-            className="filter-pill"
-            value={filter.statement}
-            onChange={(e) => setFilter({ ...filter, statement: e.target.value })}
-          >
-            <option value="">All Statements</option>
-            {statements.map((s) => (
-              <option key={s.id} value={s.id}>
-                {formatStmtDate(s.statementDate)} ({s.periodStart} to {s.periodEnd})
-              </option>
-            ))}
-          </select>
-          <select
-            className="filter-pill"
-            value={filter.category}
-            onChange={(e) => setFilter({ ...filter, category: e.target.value })}
-          >
-            <option value="">All Categories</option>
-            {CATEGORIES.map((c) => (
-              <option key={c} value={c}>{c}</option>
-            ))}
-          </select>
-          <select
-            className="filter-pill"
-            value={filter.cardholder}
-            onChange={(e) => setFilter({ ...filter, cardholder: e.target.value })}
-          >
-            <option value="">All Cardholders</option>
-            <option value="Max Blamauer">Max</option>
-            <option value="Kathryn Peddar">Kathryn</option>
-          </select>
-          <select
-            className="filter-pill"
-            value={filter.confirmed}
-            onChange={(e) => setFilter({ ...filter, confirmed: e.target.value })}
-          >
-            <option value="">All Status</option>
-            <option value="false">Unconfirmed</option>
-            <option value="true">Confirmed</option>
-          </select>
-          {unconfirmedCount > 0 && (
-            <button className="btn btn-sm" onClick={confirmAll}>
-              Confirm All ({unconfirmedCount})
-            </button>
-          )}
+        <div className="stats-summary">
+          <SparkCard
+            label={filter.statement ? 'Statement Spending' : 'Total Spending'}
+            value={currentStatementSpending.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })}
+          />
+          <SparkCard
+            label="Previous Statement"
+            value={prevStatementSpending !== null
+              ? prevStatementSpending.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })
+              : '--'}
+            change={filter.statement && prevStatementSpending !== null ? trendPct : undefined}
+            invertColor
+          />
+          <SparkCard
+            label="Transactions"
+            value={String(transactions.filter((t) => !t.isCredit).length)}
+          />
+          <SparkCard
+            label="Refunds"
+            value={creditAmount > 0 ? `-${creditAmount.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })}` : '$0.00'}
+            valueColor={creditAmount > 0 ? 'var(--green)' : undefined}
+          />
+
         </div>
       </div>
 
@@ -317,7 +353,11 @@ export function TransactionList({ onUpdate, initialCategory = '', initialStateme
       </div>
       )}
       {!loading && transactions.length === 0 && (
-        <p className="empty-state">No transactions found. Upload a statement to get started.</p>
+        <p className="empty-state">
+          {allTransactions.length === 0
+            ? 'No transactions found. Upload a statement to get started.'
+            : 'No transactions match the current filters.'}
+        </p>
       )}
     </div>
   );

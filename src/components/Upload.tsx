@@ -1,6 +1,6 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { collection, addDoc, getDocs, doc, query, where, writeBatch, Timestamp } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, query, where, writeBatch, Timestamp, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { parseStatement } from '../lib/parser';
 import type { CategoryMapping } from '../lib/categorize';
@@ -10,10 +10,41 @@ interface Props {
   householdId: string;
 }
 
+interface StatementInfo {
+  id: string;
+  statementDate: string;
+  periodStart: string;
+  periodEnd: string;
+  totalBalance: number;
+  filename: string;
+}
+
+function formatStmtDate(dateStr: string): string {
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const [, m, d] = dateStr.split('-');
+  return `${months[parseInt(m, 10) - 1]} ${d}`;
+}
+
+function fmtMoney(n: number): string {
+  return n.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' });
+}
+
 export function Upload({ onUploaded, householdId }: Props) {
   const [status, setStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
   const [message, setMessage] = useState('');
   const [fileName, setFileName] = useState('');
+  const [statements, setStatements] = useState<StatementInfo[]>([]);
+
+  const fetchStatements = useCallback(async () => {
+    const snap = await getDocs(
+      query(collection(db, 'households', householdId, 'statements'), orderBy('statementDate', 'desc'))
+    );
+    setStatements(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StatementInfo)));
+  }, [householdId]);
+
+  useEffect(() => {
+    fetchStatements();
+  }, [fetchStatements]);
 
   const onDrop = useCallback(
     async (files: File[]) => {
@@ -80,15 +111,30 @@ export function Upload({ onUploaded, householdId }: Props) {
 
         setStatus('success');
         setMessage(`${parsed.transactions.length} transactions imported`);
-        setTimeout(onUploaded, 800);
+        setTimeout(async () => {
+          await fetchStatements();
+          onUploaded();
+        }, 800);
       } catch (err) {
         console.error('Parse error:', err);
         setStatus('error');
         setMessage(err instanceof Error ? err.message : 'Failed to parse statement');
       }
     },
-    [onUploaded, householdId]
+    [onUploaded, householdId, fetchStatements]
   );
+
+  const deleteStatement = async (id: string) => {
+    if (!confirm('Delete this statement and all its transactions?')) return;
+    const txnSnap = await getDocs(
+      query(collection(db, 'households', householdId, 'transactions'), where('statementId', '==', id))
+    );
+    const deletePromises = txnSnap.docs.map((d) => deleteDoc(d.ref));
+    await Promise.all(deletePromises);
+    await deleteDoc(doc(db, 'households', householdId, 'statements', id));
+    await fetchStatements();
+    onUploaded();
+  };
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
@@ -145,6 +191,30 @@ export function Upload({ onUploaded, householdId }: Props) {
             <p className="error-text">{message}</p>
             <p className="upload-retry">Click or drop to try again</p>
           </div>
+        )}
+      </div>
+
+      <div className="statements-list">
+        <h3>Upload History</h3>
+        {statements.length === 0 ? (
+          <p className="empty-state">No statements uploaded yet.</p>
+        ) : (
+          <table className="statements-table">
+            <thead>
+              <tr><th>Date</th><th>Period</th><th>Balance</th><th>File</th><th></th></tr>
+            </thead>
+            <tbody>
+              {statements.map((s) => (
+                <tr key={s.id}>
+                  <td>{formatStmtDate(s.statementDate)}</td>
+                  <td>{s.periodStart} to {s.periodEnd}</td>
+                  <td>{fmtMoney(s.totalBalance)}</td>
+                  <td>{s.filename}</td>
+                  <td><button className="btn btn-xs btn-danger" onClick={() => deleteStatement(s.id)}>Delete</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
     </div>
