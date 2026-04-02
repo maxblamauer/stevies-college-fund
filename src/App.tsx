@@ -13,7 +13,7 @@ import { HouseholdSetup } from './components/HouseholdSetup';
 import stevieLogoMarkSm from './assets/stevie-logo-mark-sm.png';
 import './App.css';
 
-const APP_BRAND_NAME = 'Stevies College Fund';
+const DEFAULT_PAGE_TITLE = 'Spending tracker';
 
 type Tab = 'dashboard' | 'transactions' | 'upload' | 'mappings';
 
@@ -21,6 +21,7 @@ function App() {
   const [user, setUser] = useState<User | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [householdId, setHouseholdId] = useState<string | null>(null);
+  const [householdName, setHouseholdName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [householdLoading, setHouseholdLoading] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -44,6 +45,7 @@ function App() {
       setAuthLoading(false);
       if (!firebaseUser) {
         setHouseholdId(null);
+        setHouseholdName('');
         setInviteCode('');
       }
     });
@@ -55,6 +57,16 @@ function App() {
     if (!user) return;
     loadHousehold();
   }, [user]);
+
+  useEffect(() => {
+    if (householdName) {
+      document.title = householdName;
+      return () => {
+        document.title = DEFAULT_PAGE_TITLE;
+      };
+    }
+    document.title = DEFAULT_PAGE_TITLE;
+  }, [householdName]);
 
   const loadHousehold = async () => {
     if (!user) return;
@@ -68,14 +80,19 @@ function App() {
         const householdDoc = await getDoc(doc(db, 'households', data.householdId));
         if (householdDoc.exists()) {
           const hData = householdDoc.data();
+          setHouseholdName(typeof hData.name === 'string' && hData.name.trim() ? hData.name.trim() : 'Household');
           setInviteCode(hData.inviteCode || '');
+        } else {
+          setHouseholdName('Household');
         }
       } else {
         setHouseholdId(null);
+        setHouseholdName('');
       }
     } catch (err) {
       console.error('Failed to load household:', err);
       setHouseholdId(null);
+      setHouseholdName('');
     } finally {
       setHouseholdLoading(false);
     }
@@ -122,7 +139,7 @@ function App() {
           <div className="stevie-logo-clip stevie-logo-clip-sm" aria-hidden>
             <img src={stevieLogoMarkSm} alt="" />
           </div>
-          <h1>{APP_BRAND_NAME}</h1>
+          <h1>{householdName}</h1>
         </div>
         <nav className="tabs">
           {(['dashboard', 'transactions', 'upload', 'mappings'] as Tab[]).map((tab) => (
@@ -155,7 +172,7 @@ function App() {
                       <div className="stevie-logo-clip stevie-logo-clip-xs" aria-hidden>
                         <img src={stevieLogoMarkSm} alt="" />
                       </div>
-                      <span className="user-menu-household-name">{APP_BRAND_NAME}</span>
+                      <span className="user-menu-household-name">{householdName}</span>
                     </div>
                   </div>
                   {inviteCode && (
