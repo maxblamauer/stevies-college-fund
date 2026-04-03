@@ -2,14 +2,15 @@ import { useState } from 'react';
 import { signOut } from 'firebase/auth';
 import { doc, setDoc, addDoc, collection, query, where, getDocs, Timestamp } from 'firebase/firestore';
 import { auth, db } from '../firebase';
-import stevieLogoMarkLg from '../assets/stevie-logo-mark-lg.png';
+import stevieLogoWithText from '../assets/stevie-logo-with-text.png';
+import stevieLogoRedBadge from '../assets/stevie-logo-login-note-open.png';
 import { ThemeToggleButton } from './ui/ThemeToggleButton';
 
 interface Props {
   uid: string;
   userName: string;
   userEmail: string;
-  onComplete: () => void;
+  onComplete: (justCreated?: boolean) => void;
 }
 
 function generateInviteCode(): string {
@@ -27,6 +28,7 @@ export function HouseholdSetup({ uid, userName, userEmail, onComplete }: Props) 
   const [inviteCode, setInviteCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [logoRedBadge, setLogoRedBadge] = useState(false);
 
   const createHousehold = async () => {
     if (!householdName.trim()) {
@@ -56,7 +58,7 @@ export function HouseholdSetup({ uid, userName, userEmail, onComplete }: Props) 
         name: userName,
       });
 
-      onComplete();
+      onComplete(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create household');
     } finally {
@@ -123,15 +125,23 @@ export function HouseholdSetup({ uid, userName, userEmail, onComplete }: Props) 
         <div className="household-card">
           <div className="household-card-body">
             <div className="household-card-header">
-              <div className="household-logo-wrap">
-                <img
-                  src={stevieLogoMarkLg}
-                  alt=""
-                  className="household-brand-logo"
-                  width={256}
-                  height={256}
-                />
-              </div>
+              <button
+                type="button"
+                className="onboarding-logo-btn"
+                onClick={() => setLogoRedBadge((v) => !v)}
+                aria-pressed={logoRedBadge}
+                aria-label={logoRedBadge ? 'Show green wordmark logo' : 'Show red wordmark logo'}
+              >
+                <div className="household-logo-wrap">
+                  <img
+                    src={logoRedBadge ? stevieLogoRedBadge : stevieLogoWithText}
+                    alt=""
+                    className="household-brand-logo"
+                    width={256}
+                    height={256}
+                  />
+                </div>
+              </button>
               <h1 className="household-title">{heading}</h1>
             </div>
 
@@ -162,14 +172,20 @@ export function HouseholdSetup({ uid, userName, userEmail, onComplete }: Props) 
                   placeholder="e.g. Denver's College Fund"
                   value={householdName}
                   onChange={(e) => setHouseholdName(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && void createHousehold()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      void createHousehold();
+                    }
+                  }}
                   autoFocus
                 />
-                <div className="household-actions">
-                  <button type="button" className="btn" onClick={() => { setError(''); setMode('choose'); }}>
-                    Back
-                  </button>
-                  <button type="button" className="btn btn-save" onClick={() => void createHousehold()} disabled={loading}>
+                <div className="household-actions household-actions--single-primary">
+                  <button
+                    type="button"
+                    className="btn btn-save"
+                    onClick={() => void createHousehold()}
+                    disabled={loading}
+                  >
                     {loading ? 'Creating...' : 'Create'}
                   </button>
                 </div>
@@ -189,10 +205,7 @@ export function HouseholdSetup({ uid, userName, userEmail, onComplete }: Props) 
                   maxLength={6}
                   autoFocus
                 />
-                <div className="household-actions">
-                  <button type="button" className="btn" onClick={() => { setError(''); setMode('choose'); }}>
-                    Back
-                  </button>
+                <div className="household-actions household-actions--single-primary">
                   <button type="button" className="btn btn-save" onClick={() => void joinHousehold()} disabled={loading}>
                     {loading ? 'Joining...' : 'Join'}
                   </button>
@@ -203,10 +216,10 @@ export function HouseholdSetup({ uid, userName, userEmail, onComplete }: Props) 
             {error && <p className="login-error household-inline-error">{error}</p>}
           </div>
 
-          {mode === 'choose' && (
+          {(mode === 'choose' || mode === 'create' || mode === 'join') && (
             <div className="household-card-footer">
               <button type="button" className="household-setup-account-back" onClick={() => void switchGoogleAccount()}>
-                ← Use a different Google account
+                Use a different Google account
               </button>
             </div>
           )}

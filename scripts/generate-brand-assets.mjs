@@ -1,8 +1,9 @@
 /**
- * From src/assets/stevie-logo-mark.png (source of truth):
+ * From src/assets/stevie-mood-happy.png (source of truth for the happy mark):
  * - public/favicon.png — 64px tab icon
  * - stevie-logo-mark-sm.png — header / account menu (~36px CSS → enough for 2–3x DPR)
- * - stevie-logo-mark-lg.png — household welcome / large hero (up to ~200px CSS → sharp on retina)
+ *
+ * Large in-app marks use stevie-mood-happy.png / stevie-mood-skeptical.png directly (no resize here).
  */
 import sharp from 'sharp';
 import { fileURLToPath } from 'url';
@@ -10,7 +11,7 @@ import path from 'path';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.join(__dirname, '..');
-const src = path.join(root, 'src/assets/stevie-logo-mark.png');
+const src = path.join(root, 'src/assets/stevie-mood-happy.png');
 
 function circleMask(size) {
   return Buffer.from(
@@ -33,4 +34,3 @@ async function writeCircularPng(size, outRel) {
 
 await writeCircularPng(64, 'public/favicon.png');
 await writeCircularPng(192, 'src/assets/stevie-logo-mark-sm.png');
-await writeCircularPng(640, 'src/assets/stevie-logo-mark-lg.png');

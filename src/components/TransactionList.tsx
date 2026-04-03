@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { collection, getDocs, doc, updateDoc, query, where, addDoc, writeBatch, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CATEGORIES } from '../types';
+import { extractMerchantPattern } from '../lib/categorize';
 import { SparkCard } from './ui/SparkCard';
 import { FilterSelect } from './ui/FilterSelect';
 import { reconcileBillingPeriod } from '../lib/statementPeriod';
@@ -307,8 +308,9 @@ export function TransactionList({
           onChange={(value) => setFilter({ ...filter, cardholder: value })}
           options={[
             { value: '', label: 'All Cardholders' },
-            { value: 'Max Blamauer', label: 'Max' },
-            { value: 'Kathryn Peddar', label: 'Kathryn' },
+            ...Array.from(new Set(allTransactions.map((t) => t.cardholder).filter(Boolean)))
+              .sort()
+              .map((name) => ({ value: name, label: name.split(' ')[0] || name })),
           ]}
         />
         <FilterSelect
@@ -465,20 +467,3 @@ export function TransactionList({
   );
 }
 
-function extractMerchantPattern(description: string): string {
-  let cleaned = description
-    .replace(/\s+(ON|BC|AB|QC|MB|SK|NB|NS|PE|NL|NT|YT|NU)\s*$/i, '')
-    .replace(/\s+#\d+/g, '')
-    .replace(/\s+\d+$/, '')
-    .replace(/\*[A-Z0-9]+/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-
-  const foreignMatch = description.match(/(?:MXN|USD|EUR|GBP)\s+[\d.]+@[\d.]+\s+(.*)/i);
-  if (foreignMatch) {
-    cleaned = foreignMatch[1].replace(/\s+(ON|BC|AB|QC)\s*$/i, '').replace(/\s+\d+$/, '').trim();
-  }
-
-  const words = cleaned.split(/\s+/).slice(0, 3);
-  return words.join(' ').toLowerCase();
-}

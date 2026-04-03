@@ -5,6 +5,7 @@ import { db } from '../firebase';
 import { parseStatement } from '../lib/parser';
 import { reconcileBillingPeriod } from '../lib/statementPeriod';
 import type { CategoryMapping } from '../lib/categorize';
+import type { CardProfile } from '../types';
 
 interface Props {
   /** Called after a successful upload with the new statement document id (for deep-linking Transactions). */
@@ -36,6 +37,8 @@ export function Upload({ onUploaded, householdId }: Props) {
   const [message, setMessage] = useState('');
   const [fileName, setFileName] = useState('');
   const [statements, setStatements] = useState<StatementInfo[]>([]);
+  const [cardProfiles, setCardProfiles] = useState<CardProfile[]>([]);
+  const [selectedProfileId, setSelectedProfileId] = useState('');
 
   const fetchStatements = useCallback(async () => {
     const snap = await getDocs(
@@ -44,9 +47,17 @@ export function Upload({ onUploaded, householdId }: Props) {
     setStatements(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StatementInfo)));
   }, [householdId]);
 
+  const fetchCardProfiles = useCallback(async () => {
+    const snap = await getDocs(collection(db, 'households', householdId, 'cardProfiles'));
+    const profiles = snap.docs.map((d) => ({ id: d.id, ...d.data() } as CardProfile));
+    setCardProfiles(profiles);
+    if (profiles.length === 1) setSelectedProfileId(profiles[0].id!);
+  }, [householdId]);
+
   useEffect(() => {
     fetchStatements();
-  }, [fetchStatements]);
+    fetchCardProfiles();
+  }, [fetchStatements, fetchCardProfiles]);
 
   const onDrop = useCallback(
     async (files: File[]) => {
@@ -64,8 +75,11 @@ export function Upload({ onUploaded, householdId }: Props) {
         const mappingsSnap = await getDocs(collection(db, 'households', householdId, 'categoryMappings'));
         const mappings: CategoryMapping[] = mappingsSnap.docs.map((doc) => doc.data() as CategoryMapping);
 
-        // Parse the PDF
-        const parsed = await parseStatement(data, mappings);
+        // Find selected card profile (if any)
+        const selectedProfile = cardProfiles.find((p) => p.id === selectedProfileId);
+
+        // Parse the PDF using card profile for format-aware parsing
+        const parsed = await parseStatement(data, mappings, selectedProfile);
 
         // Check for duplicate
         const existingSnap = await getDocs(
@@ -149,6 +163,24 @@ export function Upload({ onUploaded, householdId }: Props) {
     <div className="upload-page">
       <h2>Upload Statement</h2>
       <p className="upload-hint">Upload a credit card statement PDF</p>
+
+      {cardProfiles.length > 1 && (
+        <div className="card-profile-select">
+          <label htmlFor="card-select">Card: </label>
+          <select
+            id="card-select"
+            value={selectedProfileId}
+            onChange={(e) => setSelectedProfileId(e.target.value)}
+          >
+            <option value="">Select a card...</option>
+            {cardProfiles.map((p) => (
+              <option key={p.id} value={p.id!}>
+                {p.cardLabel} ({p.bankName})
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
 
       <div
         {...getRootProps()}

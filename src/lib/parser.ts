@@ -2,6 +2,7 @@ import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import { categorizeTransaction } from './categorize';
 import type { CategoryMapping } from './categorize';
 import { reconcileBillingPeriod } from './statementPeriod';
+import type { CardProfile } from '../types';
 
 GlobalWorkerOptions.workerSrc = new URL(
   'pdfjs-dist/build/pdf.worker.mjs',
@@ -39,7 +40,7 @@ const MONTHS: Record<string, string> = {
   october: '10', november: '11', december: '12',
 };
 
-async function extractText(data: Uint8Array): Promise<string> {
+export async function extractText(data: Uint8Array): Promise<string> {
   const doc = await getDocument({ data }).promise;
   const pages: string[] = [];
   for (let i = 1; i <= doc.numPages; i++) {
@@ -120,11 +121,18 @@ function detectBank(text: string): Bank {
 
 export async function parseStatement(
   data: Uint8Array,
-  mappings: CategoryMapping[]
+  mappings: CategoryMapping[],
+  cardProfile?: CardProfile
 ): Promise<ParsedStatement> {
   const text = await extractText(data);
-  const bank = detectBank(text);
 
+  // If we have a card profile, use profile-aware parsing
+  if (cardProfile) {
+    return parseWithProfile(text, mappings, cardProfile);
+  }
+
+  // Legacy path: auto-detect bank
+  const bank = detectBank(text);
   if (bank === 'bmo') {
     return parseBMO(text, mappings);
   }
@@ -375,4 +383,114 @@ function extractBalance(text: string): number {
     if (m) return parseFloat(m[1].replace(/,/g, ''));
   }
   return 0;
+}
+
+// ============================================================
+// Profile-aware parser — uses AI-generated card profile
+// ============================================================
+
+function parseWithProfile(
+  text: string,
+  mappings: CategoryMapping[],
+  profile: CardProfile
+): ParsedStatement {
+  const year = detectYear(text);
+  const fullText = text.replace(/\n/g, ' ');
+
+  const statementDate = extractStatementDate(fullText, year);
+  const { periodStart, periodEnd } = extractPeriod(fullText, year);
+  const totalBalance = extractBalance(fullText);
+
+  // Build cardholder sections if the statement has them
+  const sections: Array<{ cardholder: string; text: string }> = [];
+
+  if (profile.hasSections && profile.cardholderPatterns.length > 0) {
+    // Find each cardholder's section in the text
+    for (let i = 0; i < profile.cardholderPatterns.length; i++) {
+      const pattern = profile.cardholderPatterns[i];
+      const displayName = profile.cardholders[i] || pattern;
+      const patternEscaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+      // Look for text between this cardholder's name and the next (or subtotal)
+      const subtotalPattern = `(?:Subtotal for ${patternEscaped}|Card number:|${
+        profile.cardholderPatterns
+          .filter((_, j) => j !== i)
+          .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+          .join('|') || '$'
+      })`;
+
+      const sectionRegex = new RegExp(
+        `${patternEscaped}([\\s\\S]*?)(?:${subtotalPattern}|$)`,
+        'i'
+      );
+      const sectionMatch = fullText.match(sectionRegex);
+      if (sectionMatch) {
+        sections.push({ cardholder: displayName, text: sectionMatch[1] });
+      }
+    }
+  }
+
+  // If no sections found, treat entire text as one section
+  if (sections.length === 0) {
+    const defaultCardholder = profile.cardholders[0] || 'Primary';
+    sections.push({ cardholder: defaultCardholder, text: fullText });
+  }
+
+  // Parse transactions from each section
+  const transactions: ParsedTransaction[] = [];
+  const seen = new Set<string>();
+
+  const datePatterns = [
+    '([A-Z][a-z]+\\.?\\s+\\d{1,2})',
+    '(\\d{2}[/\\-]\\d{2})',
+    '(\\d{4}-\\d{2}-\\d{2})',
+  ];
+  const amtPattern = '\\$?([\\d,]+\\.\\d{2})\\s*(CR|cr|-)?';
+
+  for (const section of sections) {
+    for (const dp of datePatterns) {
+      if (profile.useTwoDateFormat) {
+        const twoDateRegex = new RegExp(
+          dp + '\\s+' + dp + '\\s+' + '(.+?)\\s+' + amtPattern, 'g'
+        );
+        let match;
+        while ((match = twoDateRegex.exec(section.text)) !== null) {
+          const txn = buildTransaction(match[1], match[2], match[3], match[4], match[5], year, mappings);
+          if (txn && !seen.has(txn.key)) {
+            seen.add(txn.key);
+            transactions.push({ ...txn.parsed, cardholder: section.cardholder });
+          }
+        }
+      }
+
+      // Always try single-date as fallback
+      const oneDateRegex = new RegExp(
+        dp + '\\s+' + '(.+?)\\s+' + amtPattern, 'g'
+      );
+      let match;
+      while ((match = oneDateRegex.exec(section.text)) !== null) {
+        const txn = buildTransaction(match[1], match[1], match[2], match[3], match[4], year, mappings);
+        if (txn && !seen.has(txn.key)) {
+          seen.add(txn.key);
+          transactions.push({ ...txn.parsed, cardholder: section.cardholder });
+        }
+      }
+    }
+  }
+
+  transactions.sort((a, b) => b.transDate.localeCompare(a.transDate));
+
+  let periodStartOut = periodStart;
+  let periodEndOut = periodEnd;
+  if (periodStartOut && periodEndOut) {
+    ({ periodStart: periodStartOut, periodEnd: periodEndOut } = reconcileBillingPeriod(periodStartOut, periodEndOut));
+  }
+
+  return {
+    statementDate,
+    periodStart: periodStartOut,
+    periodEnd: periodEndOut,
+    totalBalance,
+    transactions,
+  };
 }

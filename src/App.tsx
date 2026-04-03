@@ -10,9 +10,10 @@ import { Dashboard } from './components/Dashboard';
 import { MappingsManager } from './components/MappingsManager';
 import { Login } from './components/Login';
 import { HouseholdSetup } from './components/HouseholdSetup';
+import { OnboardingMappingSetup } from './components/OnboardingMappingSetup';
 import stevieLogoMarkSm from './assets/stevie-logo-mark-sm.png';
-import stevieMoodGood from './assets/stevie-logo-mark-lg.png';
-import stevieMoodBad from './assets/stevie-logo-mark-trend-negative.png';
+import stevieMoodGood from './assets/stevie-mood-happy.png';
+import stevieMoodBad from './assets/stevie-mood-skeptical.png';
 import { pickStevieQuip, type StevieMoodReport } from './lib/stevieMood';
 import { StevieThoughtBubble } from './components/ui/StevieThoughtBubble';
 import './App.css';
@@ -37,6 +38,7 @@ function App() {
   const [cardholder, setCardholder] = useState('');
   const { theme, setTheme } = useTheme();
   const authUidRef = useRef<string | null>(null);
+  const [showMappingOnboarding, setShowMappingOnboarding] = useState(false);
   const [stevieMood, setStevieMood] = useState<StevieMoodReport | null>(null);
   const [steviePopoverOpen, setSteviePopoverOpen] = useState(false);
   const [stevieQuip, setStevieQuip] = useState('');
@@ -54,6 +56,7 @@ function App() {
         setHouseholdId(null);
         setHouseholdName('');
         setInviteCode('');
+        setShowMappingOnboarding(false);
       }
     });
     return unsubscribe;
@@ -175,7 +178,19 @@ function App() {
         uid={user.uid}
         userName={user.displayName || ''}
         userEmail={user.email || ''}
-        onComplete={loadHousehold}
+        onComplete={(justCreated?: boolean) => {
+          if (justCreated) setShowMappingOnboarding(true);
+          loadHousehold();
+        }}
+      />
+    );
+  }
+
+  if (showMappingOnboarding && householdId) {
+    return (
+      <OnboardingMappingSetup
+        householdId={householdId}
+        onComplete={() => setShowMappingOnboarding(false)}
       />
     );
   }

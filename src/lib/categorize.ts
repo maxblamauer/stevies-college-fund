@@ -390,3 +390,21 @@ export function categorizeTransaction(
 
   return { category: 'Other', confirmed: false };
 }
+
+export function extractMerchantPattern(description: string): string {
+  let cleaned = description
+    .replace(/\s+(ON|BC|AB|QC|MB|SK|NB|NS|PE|NL|NT|YT|NU)\s*$/i, '')
+    .replace(/\s+#\d+/g, '')
+    .replace(/\s+\d+$/, '')
+    .replace(/\*[A-Z0-9]+/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  const foreignMatch = description.match(/(?:MXN|USD|EUR|GBP)\s+[\d.]+@[\d.]+\s+(.*)/i);
+  if (foreignMatch) {
+    cleaned = foreignMatch[1].replace(/\s+(ON|BC|AB|QC)\s*$/i, '').replace(/\s+\d+$/, '').trim();
+  }
+
+  const words = cleaned.split(/\s+/).slice(0, 3);
+  return words.join(' ').toLowerCase();
+}

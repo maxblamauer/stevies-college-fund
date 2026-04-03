@@ -32,6 +32,17 @@ export interface MonthlyTotal {
   category?: string;
 }
 
+export interface CardProfile {
+  id?: string;
+  cardLabel: string;            // user-friendly name, e.g. "BMO Mastercard"
+  bankName: string;             // detected bank name
+  cardholders: string[];        // display names, e.g. ["Max Blamauer", "Kathryn Peddar"]
+  cardholderPatterns: string[]; // patterns to match in PDF, e.g. ["MR MAX BLAMAUER", "MRS KATHRYN PEDDAR"]
+  hasSections: boolean;         // true if statement splits transactions by cardholder
+  useTwoDateFormat: boolean;    // true if transactions have trans date + posting date
+  creditIndicator: string;      // "CR", "-", etc.
+}
+
 export const CATEGORIES = [
   'Groceries',
   'Restaurants & Dining',

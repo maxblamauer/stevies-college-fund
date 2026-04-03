@@ -2,6 +2,8 @@ import { signInWithPopup } from 'firebase/auth';
 import { auth, googleProvider } from '../firebase';
 import { useEffect, useState } from 'react';
 import stevieLogoWithText from '../assets/stevie-logo-with-text.png';
+/** Login only: skeptical Stevie with curved “STEVIES COLLEGE FUND” band (red ring). In-app header uses stevie-mood-skeptical.png instead. */
+import stevieLogoLoginNoteOpen from '../assets/stevie-logo-login-note-open.png';
 import { ThemeToggleButton } from './ui/ThemeToggleButton';
 import { StevieThoughtBubble } from './ui/StevieThoughtBubble';
 
@@ -52,7 +54,7 @@ export function Login() {
                   >
                     <div className="login-logo-wrap">
                       <img
-                        src={stevieLogoWithText}
+                        src={loginStevieOpen ? stevieLogoLoginNoteOpen : stevieLogoWithText}
                         alt=""
                         className="login-brand-logo"
                         width={256}
@@ -70,7 +72,7 @@ export function Login() {
                       <div className="login-stevie-from-logo-popover">
                         <StevieThoughtBubble variant="login">
                           <p className="stevie-mood-quip">
-                            I will bark at your spending here and there.
+                            I will bark at your spending habits here and there.
                           </p>
                         </StevieThoughtBubble>
                       </div>

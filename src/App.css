@@ -36,7 +36,7 @@
   --text: #2c2c2c;
   --text-muted: #5f6673;
   --border: #c7c4bd;
-  /* Single UI accent in light mode: buttons (.btn-save), focus rings, active toggles, dropzone tint */
+  /* Accent: focus rings, links, dropzone tint; primary actions use .tab-style black via .btn-save override */
   --accent: #5b7fa8;
   --accent-hover: #4a6d94;
   --green: #5b9a6f;
@@ -790,6 +790,39 @@ tr:hover {
 .btn-save:hover:not(:disabled) {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+}
+
+/* Primary actions match header .tab.active: theme text on theme bg (dark fill in light UI, light fill in dark UI). */
+[data-theme='light'] .btn-save {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+[data-theme='light'] .btn-save:hover:not(:disabled) {
+  background: #1f1f1f;
+  border-color: #1f1f1f;
+  color: var(--bg);
+}
+
+[data-theme='light'] .btn-save:disabled {
+  opacity: 0.5;
+}
+
+[data-theme='dark'] .btn-save {
+  background: var(--text);
+  border-color: var(--text);
+  color: var(--bg);
+}
+
+[data-theme='dark'] .btn-save:hover:not(:disabled) {
+  background: #f6f6f6;
+  border-color: #f6f6f6;
+  color: var(--bg);
+}
+
+[data-theme='dark'] .btn-save:disabled {
+  opacity: 0.5;
 }
 
 .btn-confirm {
@@ -1911,6 +1944,9 @@ tr:hover {
   background: var(--bg-hover);
   border-top: 1px solid var(--border);
   text-align: center;
+  /* Match .login-card border-radius; when the thought bubble sets overflow:visible on the card, this still rounds the strip */
+  border-bottom-left-radius: 22px;
+  border-bottom-right-radius: 22px;
 }
 
 /* Light mode: footer was too close to page --bg; deepen strip + text for clear separation */
@@ -2372,6 +2408,34 @@ tr:hover {
   margin-bottom: 8px;
 }
 
+.onboarding-logo-btn {
+  display: block;
+  margin: 0 auto 20px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 50%;
+  line-height: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.onboarding-logo-btn .household-logo-wrap {
+  margin-bottom: 0;
+}
+
+.onboarding-logo-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* Wordmark PNGs (green + red ring); match .login-brand-logo framing inside the circle */
+.onboarding-logo-btn .household-brand-logo {
+  object-position: center 50%;
+  transform: scale(1.12);
+  transform-origin: center center;
+}
+
 .household-logo-wrap {
   width: min(200px, 72vw);
   height: min(200px, 72vw);
@@ -2390,7 +2454,7 @@ tr:hover {
     0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-/* Uses stevie-logo-mark-lg.png (~640px); minimal scale keeps edges sharp */
+/* Household / mapping onboarding: stevie-logo-with-text + stevie-logo-login-note-open (login uses .login-brand-logo) */
 .household-brand-logo {
   width: 100%;
   height: 100%;
@@ -2497,6 +2561,11 @@ tr:hover {
   border-color: var(--accent);
 }
 
+.household-input:disabled {
+  opacity: 0.85;
+  cursor: not-allowed;
+}
+
 .invite-code-input {
   text-align: center;
   font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
@@ -2515,6 +2584,12 @@ tr:hover {
   flex: 1 1 auto;
   min-width: min(120px, 42%);
   min-height: 44px;
+  text-align: center;
+}
+
+.household-actions--single-primary > .btn {
+  flex: 0 1 auto;
+  min-width: min(200px, 100%);
 }
 
 @media (max-width: 380px) {
@@ -2600,5 +2675,223 @@ tr:hover {
 
 .table-skeleton-row:last-child {
   border-bottom: none;
+}
+
+/* ===== ONBOARDING MAPPING SETUP ===== */
+.onboarding-mapping-card {
+  width: 100%;
+}
+
+/* Muted grey link (Safari can paint underlined buttons as default link blue without this) */
+.onboarding-mapping-card .household-card-footer .household-setup-account-back {
+  color: var(--text-muted);
+  -webkit-text-fill-color: var(--text-muted);
+}
+
+.onboarding-mapping-card .household-card-footer .household-setup-account-back:hover {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+}
+
+[data-theme='light'] .onboarding-mapping-card .household-card-footer .household-setup-account-back {
+  color: #3d4452;
+  -webkit-text-fill-color: #3d4452;
+}
+
+[data-theme='light'] .onboarding-mapping-card .household-card-footer .household-setup-account-back:hover {
+  color: #1f2430;
+  -webkit-text-fill-color: #1f2430;
+}
+
+.onboarding-mapping-card .household-card-header {
+  margin-bottom: 18px;
+}
+
+.onboarding-mapping-card .household-title {
+  font-size: 22px;
+  line-height: 1.28;
+  letter-spacing: -0.02em;
+  margin: 4px 0 0;
+  text-wrap: balance;
+  max-width: 22em;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.onboarding-mapping-lede {
+  margin: 0 auto 22px;
+  padding: 0 4px;
+  max-width: 38em;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.55;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+
+.onboarding-dropzone {
+  padding: 40px 24px;
+  margin-top: 4px;
+}
+
+.onboarding-processing {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 0;
+  color: var(--text-muted);
+}
+
+.onboarding-mappings-scroll {
+  max-height: 360px;
+  overflow-y: auto;
+  margin: 16px 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.onboarding-mappings-table {
+  font-size: 13px;
+  width: 100%;
+}
+
+.onboarding-mappings-table td {
+  vertical-align: middle;
+}
+
+.onboarding-mappings-table code {
+  display: block;
+  margin-bottom: 2px;
+}
+
+.onboarding-sample-desc {
+  display: block;
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.onboarding-mappings-table .category-select {
+  width: 100%;
+  font-size: 12px;
+  padding: 4px 6px;
+}
+
+.onboarding-done {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 24px 0;
+  text-align: center;
+  color: var(--text);
+}
+
+.onboarding-done p {
+  max-width: 30ch;
+  line-height: 1.5;
+}
+
+/* Success screen: less dead space above, clearer title↔copy grouping, stronger bottom balance */
+.onboarding-mapping-card--done .household-card-body {
+  padding-top: 28px;
+  padding-bottom: 40px;
+}
+
+.onboarding-mapping-card--done .onboarding-logo-btn {
+  margin-bottom: 14px;
+}
+
+.onboarding-mapping-card--done .household-card-header {
+  margin-bottom: 8px;
+}
+
+.onboarding-mapping-card--done .household-title {
+  margin: 0;
+}
+
+.onboarding-mapping-card--done .onboarding-done {
+  padding: 10px 0 22px;
+  gap: 0;
+}
+
+.onboarding-mapping-card--done .onboarding-done p {
+  max-width: 34ch;
+  margin: 0;
+}
+
+.onboarding-mapping-card--done .household-actions {
+  margin-top: 2px;
+}
+
+@media (max-width: 640px) {
+  .onboarding-mapping-card--done .household-card-body {
+    padding-top: 22px;
+    padding-bottom: 32px;
+  }
+
+  .onboarding-mapping-card--done .onboarding-logo-btn {
+    margin-bottom: 12px;
+  }
+
+  .onboarding-mapping-card--done .onboarding-done {
+    padding: 8px 0 18px;
+  }
+}
+
+/* ===== CARD PROFILE SELECT ===== */
+.card-profile-select {
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card-profile-select label {
+  font-size: 14px;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.card-profile-select select {
+  flex: 1;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  font-size: 14px;
+}
+
+/* ===== ADD CARD INLINE ===== */
+.add-card-btn {
+  margin-top: 12px;
+}
+
+.add-card-inline {
+  margin-top: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+}
+
+.add-card-inline .household-input {
+  margin-bottom: 12px;
+}
+
+.add-card-dropzone {
+  padding: 32px 16px;
+  margin-bottom: 12px;
+}
+
+.add-card-success {
+  color: var(--green);
+  margin-bottom: 12px;
 }
 

@@ -314,8 +314,9 @@ export function Dashboard({
             onChange={onCardholderChange}
             options={[
               { value: '', label: 'All Cardholders' },
-              { value: 'Max Blamauer', label: 'Max' },
-              { value: 'Kathryn Peddar', label: 'Kathryn' },
+              ...Array.from(new Set(allTransactions.map((t) => t.cardholder).filter(Boolean)))
+                .sort()
+                .map((name) => ({ value: name, label: name.split(' ')[0] || name })),
             ]}
           />
         </div>
