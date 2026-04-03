@@ -127,6 +127,233 @@ body {
   display: block;
 }
 
+.stevie-mood-anchor {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.stevie-mood-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  border-radius: 50%;
+  line-height: 0;
+  width: 48px;
+  height: 48px;
+  flex-shrink: 0;
+  box-sizing: border-box;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.stevie-mood-btn--good,
+.stevie-mood-btn--bad {
+  box-shadow: none;
+}
+
+.stevie-mood-btn .stevie-logo-clip {
+  box-shadow: none;
+}
+
+.stevie-mood-btn:hover {
+  transform: scale(1.05);
+}
+
+.stevie-mood-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/*
+ * Header Stevie: same geometry as the old spark-card trend logos (6bf12a6) — 2px mood border,
+ * cover + scale — but logos stay in the header only, not on stat cards.
+ */
+.stevie-mood-btn .stevie-logo-clip-sm {
+  width: 48px;
+  height: 48px;
+  max-width: 48px;
+  max-height: 48px;
+  box-sizing: border-box;
+  background: var(--bg-card);
+  position: relative;
+  border-radius: 50%;
+  overflow: hidden;
+  clip-path: circle(50% at 50% 50%);
+  line-height: 0;
+  border: 2px solid transparent;
+}
+
+.stevie-mood-btn--good .stevie-logo-clip-sm {
+  border-color: var(--green);
+}
+
+.stevie-mood-btn--bad .stevie-logo-clip-sm {
+  border-color: var(--red);
+}
+
+.stevie-mood-btn .stevie-logo-clip img {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  right: auto;
+  bottom: auto;
+  width: 48px;
+  height: 48px;
+  margin: 0;
+  padding: 0;
+  transform: translate(-50%, -50%) scale(1.26);
+  transform-origin: center center;
+  object-fit: cover;
+  object-position: center center;
+  display: block;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  box-sizing: border-box;
+}
+
+.stevie-mood-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 140;
+  background: transparent;
+}
+
+@keyframes stevie-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.stevie-mood-popover {
+  --stevie-bubble-tail-x: 24px;
+  position: absolute;
+  top: calc(100% + 14px);
+  left: 0;
+  z-index: 150;
+  width: min(320px, calc(100vw - 32px));
+  padding: 14px 16px 15px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: none;
+  text-align: left;
+  animation: stevie-bubble-in 0.22s ease-out;
+  transform-origin: var(--stevie-bubble-tail-x) 0;
+  /* Drop-shadow paints the whole bubble + CSS tails so the caret reads on same-colored header. */
+  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.18));
+}
+
+[data-theme='light'] .stevie-mood-popover {
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.1));
+}
+
+/* Speech-bubble tail pointing up at the avatar (border + fill) */
+.stevie-mood-popover::before {
+  content: '';
+  position: absolute;
+  top: -11px;
+  left: var(--stevie-bubble-tail-x);
+  transform: translateX(-50%);
+  z-index: 0;
+  border: 10px solid transparent;
+  border-bottom-color: var(--border);
+  pointer-events: none;
+}
+
+.stevie-mood-popover::after {
+  content: '';
+  position: absolute;
+  top: -9px;
+  left: var(--stevie-bubble-tail-x);
+  transform: translateX(-50%);
+  z-index: 1;
+  border: 9px solid transparent;
+  border-bottom-color: var(--bg-card);
+  pointer-events: none;
+}
+
+.stevie-mood-popover.stevie-mood-popover--thought {
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  width: min(
+    300px,
+    calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px))
+  );
+  aspect-ratio: 320 / 168;
+  min-height: 0;
+  transform-origin: 48px 22%;
+  filter: none;
+  isolation: isolate;
+}
+
+.stevie-mood-popover--thought::before,
+.stevie-mood-popover--thought::after {
+  display: none;
+}
+
+.stevie-thought-svg {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--text);
+  pointer-events: none;
+  filter: drop-shadow(0 6px 20px rgba(0, 0, 0, 0.2));
+}
+
+[data-theme='light'] .stevie-thought-svg {
+  filter: drop-shadow(0 6px 18px rgba(0, 0, 0, 0.12));
+}
+
+.stevie-mood-popover--thought .stevie-mood-popover-content {
+  position: absolute;
+  z-index: 2;
+  left: 14%;
+  right: 14%;
+  top: 40%;
+  bottom: 22%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 4px 8px;
+  box-sizing: border-box;
+}
+
+.stevie-mood-popover--thought .stevie-mood-quip {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.35;
+  margin: 0;
+  color: var(--text);
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+
+.stevie-mood-quip {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.45;
+  margin: 0 0 10px;
+}
+
 .header-right {
   display: flex;
   align-items: center;
@@ -197,6 +424,9 @@ body {
   max-width: 1200px;
   margin: 0 auto;
   padding: 24px;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
 }
 
 /* ===== UPLOAD ===== */
@@ -322,11 +552,14 @@ body {
   gap: 8px;
   flex-wrap: wrap;
   align-items: center;
+  min-width: 0;
 }
 
 .transactions-filters-top {
   justify-content: flex-end;
   margin-bottom: 12px;
+  min-width: 0;
+  width: 100%;
 }
 
 .transactions-pending-bar {
@@ -675,17 +908,44 @@ tr:hover {
 }
 
 /* ===== DASHBOARD ===== */
+.dashboard {
+  min-width: 0;
+}
+
 .dashboard-controls {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 10px;
+  width: 100%;
+  min-width: 0;
+  align-items: stretch;
+}
+
+.dashboard-controls .filter-pill {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .dashboard-top-bar {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: stretch;
   margin-bottom: 16px;
+  width: 100%;
+  min-width: 0;
+}
+
+/* Match Transactions: filter group right-aligned from tablet/desktop up */
+@media (min-width: 641px) {
+  .dashboard-top-bar {
+    justify-content: flex-end;
+  }
+
+  .dashboard-controls {
+    width: min(520px, 100%);
+    margin-left: auto;
+  }
 }
 
 /* Pill-style filter selects */
@@ -738,9 +998,17 @@ tr:hover {
 
 .stats-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  /* Fixed column counts so card width stays stable (auto-fit reflows column count with viewport). */
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 24px;
+  min-width: 0;
+}
+
+@media (max-width: 960px) and (min-width: 641px) {
+  .stats-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 /* Stat cards */
@@ -749,6 +1017,18 @@ tr:hover {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 16px;
+}
+
+.spark-card--stevie-highlight--good {
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--green) 52%, var(--border)),
+    var(--shadow);
+}
+
+.spark-card--stevie-highlight--bad {
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--red) 55%, transparent),
+    var(--shadow);
 }
 
 .spark-card-label {
@@ -763,93 +1043,17 @@ tr:hover {
   font-weight: 700;
 }
 
-/*
- * Text takes flexible width; mascot sits in a fixed-width column at the card’s right edge
- * so number length changes don’t move the logo (centering in a shrinking 1fr column used to).
- */
-.spark-card-main-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 80px;
-  gap: 12px 16px;
-  align-items: start;
-  margin-top: 0;
+/* Stat body: value, optional %, optional subtitle (no card mascots — mood is in header). */
+.spark-card-body--plain .spark-card-subtitle {
+  margin-top: 4px;
 }
 
-.spark-card-main-left {
-  min-width: 0;
-}
-
-.spark-card-main-row .spark-card-subtitle {
-  margin-top: 2px;
-}
-
-/* Percentage under the dollar amount (original stat-card position) */
+/* Percentage under the dollar amount */
 .spark-card-change-pct {
   font-size: 14px;
   font-weight: 600;
   margin-top: 2px;
   line-height: 1.25;
-}
-
-/*
- * Trend mascots: fixed px box + absolute img so both PNGs get identical geometry.
- * clip-path + overflow crops scaled art. Centered in fixed right column.
- */
-.spark-card-trend-side {
-  width: 80px;
-  height: 80px;
-  aspect-ratio: 1;
-  position: relative;
-  border-radius: 50%;
-  overflow: hidden;
-  clip-path: circle(50% at 50% 50%);
-  justify-self: center;
-  align-self: center;
-  line-height: 0;
-  border: 2px solid transparent;
-  box-sizing: border-box;
-}
-
-.spark-card-trend-side--good {
-  border-color: var(--green);
-}
-
-.spark-card-trend-side--bad {
-  border-color: var(--red);
-}
-
-.spark-card-trend-mark {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 80px;
-  height: 80px;
-  margin: 0;
-  padding: 0;
-  object-fit: cover;
-  object-position: center center;
-  display: block;
-  border: none;
-  outline: none;
-  box-shadow: none;
-  box-sizing: border-box;
-  transform: translate(-50%, -50%) scale(1.26);
-  transform-origin: center center;
-}
-
-.txn-stats .spark-card-main-row {
-  grid-template-columns: minmax(0, 1fr) 68px;
-}
-
-.txn-stats .spark-card-trend-side {
-  width: 68px;
-  height: 68px;
-}
-
-.txn-stats .spark-card-trend-mark {
-  width: 68px;
-  height: 68px;
-  transform: translate(-50%, -50%) scale(1.26);
 }
 
 .txn-stats .spark-card-change-pct {
@@ -894,23 +1098,55 @@ tr:hover {
 
 .charts-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 24px;
   margin-bottom: 24px;
+  min-width: 0;
 }
 
 @media (max-width: 900px) {
   .charts-grid { grid-template-columns: 1fr; }
 }
 
+/* Tablets: 2×2 transaction filters (avoids one long row clipping like ~800px viewports) */
+@media (max-width: 900px) and (min-width: 641px) {
+  .transactions-filters-top {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .transactions-filters-top .filter-pill {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
 /* ===== MOBILE ===== */
+@media (prefers-reduced-motion: reduce) {
+  .stevie-mood-popover {
+    animation: none;
+  }
+
+  .stevie-mood-btn:hover {
+    transform: none;
+  }
+
+}
+
 @media (max-width: 640px) {
   /* Header: title left, menu right, tabs below */
   .app-header {
     display: grid;
     grid-template-columns: 1fr auto;
     grid-template-rows: auto auto;
-    padding: 8px 12px;
+    padding-top: max(8px, env(safe-area-inset-top, 0px));
+    padding-bottom: 8px;
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
     gap: 8px;
   }
 
@@ -929,6 +1165,80 @@ tr:hover {
   .stevie-logo-clip-sm {
     width: 28px;
     height: 28px;
+  }
+
+  /* 44px minimum tap target; logo stays 40px inside (matches prior visual weight). */
+  .stevie-mood-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .stevie-mood-btn .stevie-logo-clip-sm {
+    width: 40px;
+    height: 40px;
+    max-width: 40px;
+    max-height: 40px;
+  }
+
+  .stevie-mood-btn .stevie-logo-clip img {
+    width: 40px;
+    height: 40px;
+  }
+
+  .stevie-mood-popover:not(.stevie-mood-popover--thought) {
+    --stevie-bubble-tail-x: 20px;
+    border-radius: 18px;
+    padding: 14px 16px 15px;
+  }
+
+  /*
+   * Mobile Stevie note: simple popover card under the avatar (no cloud SVG) — avoids scrollbar
+   * glitches, cramped insets, and a huge centered overlay blocking the dashboard.
+   */
+  .stevie-mood-popover.stevie-mood-popover--thought {
+    position: absolute;
+    left: 0;
+    right: auto;
+    top: calc(100% + 10px);
+    width: min(292px, calc(100vw - 24px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    height: auto;
+    aspect-ratio: unset;
+    min-height: 0;
+    margin: 0;
+    padding: 14px 16px 16px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    box-shadow: var(--shadow);
+    transform: none;
+    transform-origin: 12px 0;
+    animation: stevie-bubble-in 0.22s ease-out;
+    filter: none;
+    isolation: isolate;
+    z-index: 150;
+  }
+
+  .stevie-mood-popover.stevie-mood-popover--thought .stevie-thought-svg {
+    display: none;
+  }
+
+  .stevie-mood-popover--thought .stevie-mood-popover-content {
+    position: static;
+    left: auto;
+    right: auto;
+    top: auto;
+    bottom: auto;
+    overflow: visible;
+    padding: 0;
+    display: block;
+    max-height: none;
+  }
+
+  .stevie-mood-popover--thought .stevie-mood-quip {
+    font-size: 14px;
+    line-height: 1.45;
+    text-align: left;
+    margin: 0;
   }
 
   .header-right {
@@ -957,40 +1267,43 @@ tr:hover {
   }
 
   .tab {
-    padding: 5px 10px;
-    font-size: 12px;
+    min-height: 40px;
+    padding: 8px 12px;
+    font-size: 13px;
     flex-shrink: 0;
   }
 
-  /* Main content */
+  /* Main content — extra bottom space so charts clear mobile browser chrome */
   .app-main {
-    padding: 16px 12px;
+    padding: 16px max(12px, env(safe-area-inset-right, 0px)) max(32px, calc(20px + env(safe-area-inset-bottom, 0px)))
+      max(12px, env(safe-area-inset-left, 0px));
   }
 
-  /* Dashboard */
+  /* Dashboard — same 2-column filter row as desktop (beside each other), touch-sized pills */
   .dashboard-top-bar {
-    justify-content: center;
+    justify-content: stretch;
   }
 
   .dashboard-controls {
-    flex-direction: row;
-    justify-content: center;
-    width: 100%;
+    gap: 10px;
   }
 
   .dashboard-controls .filter-pill {
-    flex: 1;
-    min-width: 0;
-    font-size: 12px;
+    min-height: 44px;
+    font-size: 14px;
+    padding: 10px 28px 10px 12px;
   }
 
+  /* One stat card per row: room for amounts, filters clipping, and trend mascot */
   .stats-summary {
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
+    grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .spark-card {
     padding: 12px;
+    overflow: hidden;
+    min-width: 0;
   }
 
   .spark-card-value {
@@ -1000,6 +1313,7 @@ tr:hover {
   /* Charts */
   .chart-card {
     padding: 14px;
+    margin-bottom: 12px;
   }
 
   /* Category breakdown: clean list on mobile */
@@ -1068,14 +1382,23 @@ tr:hover {
   .transactions-filters-top {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    justify-content: stretch;
-    gap: 8px;
+    gap: 10px;
     width: 100%;
+    justify-content: stretch;
   }
 
   .transactions-filters-top .filter-pill {
     width: 100%;
     min-width: 0;
+    min-height: 44px;
+    font-size: 14px;
+    padding: 10px 28px 10px 12px;
+  }
+
+  /* Transactions: 2×2 stat cards to match filter grid */
+  .transactions-page .stats-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
   }
 
   .transactions-pending-bar {
@@ -1102,8 +1425,8 @@ tr:hover {
 
   .transactions-table tbody tr {
     display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 2px 8px;
+    grid-template-columns: 1fr auto;
+    gap: 6px 12px;
     padding: 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
@@ -1122,35 +1445,39 @@ tr:hover {
   }
 
   .transactions-table .txn-index-cell {
-    grid-column: 1;
-    grid-row: 1;
-    align-self: start;
-    width: auto;
-    padding: 0 4px 0 0;
-    font-size: 11px;
-    line-height: 1.4;
+    display: none;
   }
 
+  /* Row 1: date only (no #), right-aligned */
   .transactions-table .date-cell {
-    grid-column: 2;
-    grid-row: 1;
-    font-size: 12px;
-  }
-
-  .transactions-table .amount-cell {
-    grid-column: 3;
-    grid-row: 1;
-    text-align: right;
-    font-size: 15px;
-    font-weight: 600;
-  }
-
-  .transactions-table .desc-cell {
     grid-column: 1 / -1;
+    grid-row: 1;
+    justify-self: end;
+    text-align: right;
+    font-size: 12px;
+    line-height: 1.3;
+  }
+
+  /* Row 2: description | amount */
+  .transactions-table .desc-cell {
+    grid-column: 1;
     grid-row: 2;
     max-width: none;
     white-space: normal;
     font-size: 14px;
+    font-weight: 600;
+    line-height: 1.35;
+    align-self: start;
+  }
+
+  .transactions-table .amount-cell {
+    grid-column: 2;
+    grid-row: 2;
+    text-align: right;
+    font-size: 15px;
+    font-weight: 600;
+    align-self: start;
+    white-space: nowrap;
   }
 
   /* Hide cardholder column on mobile */
@@ -1158,20 +1485,28 @@ tr:hover {
     display: none;
   }
 
+  /* Row 3: category | status */
   .transactions-table td:nth-child(6) {
     grid-column: 1;
     grid-row: 3;
+    align-self: end;
   }
 
   .transactions-table td:nth-child(7) {
-    grid-column: 3;
+    grid-column: 2;
     grid-row: 3;
+    justify-self: end;
+    align-self: end;
     text-align: right;
   }
 
   .transactions-table .actions-cell {
     grid-column: 1 / -1;
     padding-top: 6px;
+  }
+
+  .transactions-page .table-skeleton-row .skeleton-line:first-child {
+    display: none;
   }
 
   /* Statements table */
@@ -1316,6 +1651,8 @@ tr:hover {
   border-radius: var(--radius);
   padding: 20px;
   cursor: pointer;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .chart-card svg {
@@ -1361,6 +1698,8 @@ tr:hover {
   border-radius: var(--radius);
   padding: 20px;
   margin-bottom: 24px;
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .category-breakdown h3 {

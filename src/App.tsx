@@ -11,6 +11,10 @@ import { MappingsManager } from './components/MappingsManager';
 import { Login } from './components/Login';
 import { HouseholdSetup } from './components/HouseholdSetup';
 import stevieLogoMarkSm from './assets/stevie-logo-mark-sm.png';
+import stevieMoodGood from './assets/stevie-logo-mark-lg.png';
+import stevieMoodBad from './assets/stevie-logo-mark-trend-negative.png';
+import { pickStevieQuip, type StevieMoodReport } from './lib/stevieMood';
+import { StevieThoughtBubble } from './components/ui/StevieThoughtBubble';
 import './App.css';
 
 const APP_BRAND_NAME = 'Stevies College Fund';
@@ -33,6 +37,9 @@ function App() {
   const [cardholder, setCardholder] = useState('');
   const { theme, setTheme } = useTheme();
   const authUidRef = useRef<string | null>(null);
+  const [stevieMood, setStevieMood] = useState<StevieMoodReport | null>(null);
+  const [steviePopoverOpen, setSteviePopoverOpen] = useState(false);
+  const [stevieQuip, setStevieQuip] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
@@ -61,6 +68,24 @@ function App() {
   useEffect(() => {
     document.title = APP_BRAND_NAME;
   }, []);
+
+  useEffect(() => {
+    setSteviePopoverOpen(false);
+    // Keep mood when moving between Dashboard ↔ Transactions (same filters in App state).
+    // Only clear when leaving those tabs so Upload/Mappings don’t show a stale trend face.
+    if (activeTab !== 'dashboard' && activeTab !== 'transactions') {
+      setStevieMood(null);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!steviePopoverOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setSteviePopoverOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [steviePopoverOpen]);
 
   const loadHousehold = async () => {
     if (!user) return;
@@ -105,6 +130,33 @@ function App() {
     await signOut(auth);
   };
 
+  const stevieWorried = stevieMood?.kind === 'bad';
+  const stevieMoodSrc = stevieWorried ? stevieMoodBad : stevieMoodGood;
+
+  const stevieStatLinkEligible =
+    (activeTab === 'dashboard' || activeTab === 'transactions') &&
+    stevieMood != null &&
+    (stevieMood.kind === 'good' ||
+      stevieMood.kind === 'bad' ||
+      Boolean(stevieMood.detail));
+
+  /** Highlight the related stat card only while the Stevie popover is open; colour follows the logo (green happy, red worried). */
+  const stevieStatHighlight: 'good' | 'bad' | null =
+    steviePopoverOpen && stevieStatLinkEligible && stevieMood
+      ? stevieMood.kind === 'bad'
+        ? 'bad'
+        : 'good'
+      : null;
+
+  const toggleSteviePopover = () => {
+    if (steviePopoverOpen) {
+      setSteviePopoverOpen(false);
+    } else {
+      setStevieQuip(pickStevieQuip(stevieMood?.kind ?? 'neutral'));
+      setSteviePopoverOpen(true);
+    }
+  };
+
   if (authLoading) {
     return <div className="app"><div className="auth-loading">Loading...</div></div>;
   }
@@ -132,8 +184,37 @@ function App() {
     <div className="app">
       <header className="app-header">
         <div className="app-header-brand">
-          <div className="stevie-logo-clip stevie-logo-clip-sm" aria-hidden>
-            <img src={stevieLogoMarkSm} alt="" />
+          <div className="stevie-mood-anchor">
+            <button
+              type="button"
+              className={`stevie-mood-btn stevie-mood-btn--${stevieWorried ? 'bad' : 'good'}`}
+              onClick={toggleSteviePopover}
+              aria-expanded={steviePopoverOpen}
+              aria-haspopup="dialog"
+              aria-label={
+                stevieWorried
+                  ? 'Stevie — spending is up. Show note.'
+                  : stevieMood?.kind === 'good'
+                    ? 'Stevie — spending is down vs before. Show note.'
+                    : 'Stevie — show note'
+              }
+            >
+              <div className="stevie-logo-clip stevie-logo-clip-sm" aria-hidden>
+                <img src={stevieMoodSrc} alt="" />
+              </div>
+            </button>
+            {steviePopoverOpen && (
+              <>
+                <div
+                  className="stevie-mood-backdrop"
+                  onClick={() => setSteviePopoverOpen(false)}
+                  aria-hidden
+                />
+                <StevieThoughtBubble>
+                  <p className="stevie-mood-quip">{stevieQuip}</p>
+                </StevieThoughtBubble>
+              </>
+            )}
           </div>
           <h1>{householdName}</h1>
         </div>
@@ -241,6 +322,8 @@ function App() {
             onStatementChange={setSelectedStatement}
             cardholder={cardholder}
             onCardholderChange={setCardholder}
+            onStevieMood={setStevieMood}
+            stevieStatHighlight={stevieStatHighlight}
           />
         )}
         {activeTab === 'transactions' && (
@@ -251,6 +334,8 @@ function App() {
             initialStatement={selectedStatement}
             initialCardholder={cardholder}
             householdId={householdId}
+            onStevieMood={setStevieMood}
+            stevieStatHighlight={stevieStatHighlight}
           />
         )}
         {activeTab === 'upload' && (

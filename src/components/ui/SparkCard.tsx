@@ -1,6 +1,3 @@
-import stevieTrendPositive from '../../assets/stevie-logo-mark-lg.png';
-import stevieTrendNegative from '../../assets/stevie-logo-mark-trend-negative.png';
-
 interface SparkCardProps {
   label: string;
   value: string;
@@ -9,6 +6,8 @@ interface SparkCardProps {
   invertColor?: boolean;
   valueColor?: string;
   changeTooltip?: string;
+  /** Mood-coloured ring while Stevie’s note is open (green = happy/good context, red = worried) */
+  stevieHighlight?: 'good' | 'bad' | null;
 }
 
 export function SparkCard({
@@ -19,6 +18,7 @@ export function SparkCard({
   invertColor,
   valueColor,
   changeTooltip,
+  stevieHighlight = null,
 }: SparkCardProps) {
   const changeIsGood = invertColor ? (change ?? 0) < 0 : (change ?? 0) > 0;
   const changeColor = change !== undefined
@@ -32,56 +32,39 @@ export function SparkCard({
         : `-${Math.abs(change).toFixed(1)}%`
       : '';
 
-  const pctBlock =
+  const pctInner =
     change !== undefined ? (
-      <div className="spark-card-change-pct" style={{ color: changeColor }}>
-        {changeTooltip ? (
-          <span className="has-tooltip">
-            <span>{pctLabel}</span>
-            <span className="tooltip">{changeTooltip}</span>
-          </span>
-        ) : (
+      changeTooltip ? (
+        <span className="has-tooltip">
           <span>{pctLabel}</span>
-        )}
-      </div>
+          <span className="tooltip">{changeTooltip}</span>
+        </span>
+      ) : (
+        <span>{pctLabel}</span>
+      )
     ) : null;
 
-  const trendImage =
-    change !== undefined ? (
-      <div
-        className={`spark-card-trend-side ${changeIsGood ? 'spark-card-trend-side--good' : 'spark-card-trend-side--bad'}`}
-      >
-        <img
-          src={changeIsGood ? stevieTrendPositive : stevieTrendNegative}
-          alt=""
-          className="spark-card-trend-mark"
-          aria-hidden
-        />
-      </div>
-    ) : null;
+  const stevieToneClass =
+    stevieHighlight === 'good'
+      ? ' spark-card--stevie-highlight--good'
+      : stevieHighlight === 'bad'
+        ? ' spark-card--stevie-highlight--bad'
+        : '';
 
   return (
-    <div className="spark-card">
+    <div className={`spark-card${stevieToneClass}`}>
       <div className="spark-card-label">{label}</div>
-      {change !== undefined ? (
-        <div className="spark-card-main-row">
-          <div className="spark-card-main-left">
-            <div className="spark-card-value" style={valueColor ? { color: valueColor } : undefined}>
-              {value}
-            </div>
-            {pctBlock}
-            {subtitle && <div className="spark-card-subtitle">{subtitle}</div>}
-          </div>
-          {trendImage}
+      <div className="spark-card-body spark-card-body--plain">
+        <div className="spark-card-value" style={valueColor ? { color: valueColor } : undefined}>
+          {value}
         </div>
-      ) : (
-        <>
-          <div className="spark-card-value" style={valueColor ? { color: valueColor } : undefined}>
-            {value}
+        {change !== undefined && (
+          <div className="spark-card-change-pct" style={{ color: changeColor }}>
+            {pctInner}
           </div>
-          {subtitle && <div className="spark-card-subtitle">{subtitle}</div>}
-        </>
-      )}
+        )}
+        {subtitle && <div className="spark-card-subtitle">{subtitle}</div>}
+      </div>
     </div>
   );
 }

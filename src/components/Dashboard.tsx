@@ -7,6 +7,7 @@ import { db } from '../firebase';
 import { SparkCard } from './ui/SparkCard';
 import { FilterSelect } from './ui/FilterSelect';
 import { billingPeriodInclusiveDays, reconcileBillingPeriod } from '../lib/statementPeriod';
+import type { StevieMoodReport } from '../lib/stevieMood';
 
 const CATEGORY_COLORS: Record<string, string> = {
   'Groceries':            '#4da36a',
@@ -47,6 +48,8 @@ interface Props {
   onStatementChange: (id: string) => void;
   cardholder: string;
   onCardholderChange: (cardholder: string) => void;
+  onStevieMood?: (report: StevieMoodReport | null) => void;
+  stevieStatHighlight?: 'good' | 'bad' | null;
 }
 
 function fmtMoney(n: number): string {
@@ -61,7 +64,17 @@ function formatStmtDate(dateStr: string): string {
 
 const PIE_THRESHOLD = 3.5;
 
-export function Dashboard({ onCategoryClick, theme, householdId, selectedStatement, onStatementChange, cardholder, onCardholderChange }: Props) {
+export function Dashboard({
+  onCategoryClick,
+  theme,
+  householdId,
+  selectedStatement,
+  onStatementChange,
+  cardholder,
+  onCardholderChange,
+  onStevieMood,
+  stevieStatHighlight = null,
+}: Props) {
   const [byCategory, setByCategory] = useState<CategoryStat[]>([]);
   const [statements, setStatements] = useState<StatementInfo[]>([]);
   const [allTransactions, setAllTransactions] = useState<TransactionDoc[]>([]);
@@ -233,6 +246,51 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
     .map((d, i) => (i % barTickInterval === 0 ? d.transDate.slice(5) : null))
     .filter(Boolean) as string[];
 
+  useEffect(() => {
+    if (!onStevieMood) return;
+    if (loading) return;
+    if (byCategory.length === 0) {
+      onStevieMood(null);
+      return;
+    }
+    if (selectedStatement) {
+      if (selectedSpendingChange === undefined) {
+        onStevieMood({
+          kind: 'neutral',
+          detail: 'Pick an older statement to compare.',
+        });
+        return;
+      }
+      const pct = selectedSpendingChange;
+      const good = pct < 0;
+      onStevieMood({
+        kind: good ? 'good' : 'bad',
+        pct,
+        detail: `${pct >= 0 ? '↑' : '↓'} ${Math.abs(pct).toFixed(1)}% vs prior`,
+      });
+      return;
+    }
+    if (stmtTotals.length < 2) {
+      onStevieMood(null);
+      return;
+    }
+    const pct = spendingChange;
+    const good = pct < 0;
+    onStevieMood({
+      kind: good ? 'good' : 'bad',
+      pct,
+      detail: `${pct >= 0 ? '↑' : '↓'} ${Math.abs(pct).toFixed(1)}% vs last stmt`,
+    });
+  }, [
+    onStevieMood,
+    loading,
+    byCategory.length,
+    selectedStatement,
+    selectedSpendingChange,
+    spendingChange,
+    stmtTotals.length,
+  ]);
+
   return (
     <div className="dashboard">
       <div className="dashboard-top-bar">
@@ -309,6 +367,7 @@ export function Dashboard({ onCategoryClick, theme, householdId, selectedStateme
               }
               change={selectedStatement ? selectedSpendingChange : (stmtTotals.length > 1 ? spendingChange : undefined)}
               invertColor
+              stevieHighlight={stevieStatHighlight}
             />
             <SparkCard
               label="Average"

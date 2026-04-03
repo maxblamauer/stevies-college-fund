@@ -5,6 +5,7 @@ import { CATEGORIES } from '../types';
 import { SparkCard } from './ui/SparkCard';
 import { FilterSelect } from './ui/FilterSelect';
 import { reconcileBillingPeriod } from '../lib/statementPeriod';
+import type { StevieMoodReport } from '../lib/stevieMood';
 
 interface Transaction {
   id: string;
@@ -32,12 +33,26 @@ interface Props {
   initialStatement?: string;
   initialCardholder?: string;
   householdId: string;
+  onStevieMood?: (report: StevieMoodReport | null) => void;
+  stevieStatHighlight?: 'good' | 'bad' | null;
 }
 
 function formatStmtDate(dateStr: string): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const [, m, d] = dateStr.split('-');
   return `${months[parseInt(m) - 1]} ${d}`;
+}
+
+/** YYYY-MM-DD → "Mar 3, 2026" for table / mobile cards */
+function formatTxnDisplayDate(isoDate: string): string {
+  const parts = isoDate.split('-');
+  if (parts.length !== 3) return isoDate;
+  const y = parseInt(parts[0], 10);
+  const mo = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+  if (!y || !mo || !d) return isoDate;
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${months[mo - 1]} ${d}, ${y}`;
 }
 
 function formatTxnAmount(amount: number, isCredit: boolean): string {
@@ -56,6 +71,8 @@ export function TransactionList({
   initialStatement = '',
   initialCardholder = '',
   householdId,
+  onStevieMood,
+  stevieStatHighlight = null,
 }: Props) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filter, setFilter] = useState({
@@ -244,6 +261,22 @@ export function TransactionList({
 
   const previousLabel = filter.statement ? 'Previous statement' : 'Period compare';
 
+  useEffect(() => {
+    if (!onStevieMood) return;
+    if (loading) return;
+    if (!filter.statement || prevStatementSpending === null || prevStatementSpending <= 0) {
+      onStevieMood(null);
+      return;
+    }
+    const pct = trendPct;
+    const good = pct < 0;
+    onStevieMood({
+      kind: good ? 'good' : 'bad',
+      pct,
+      detail: `${pct >= 0 ? '↑' : '↓'} ${Math.abs(pct).toFixed(1)}% vs prior`,
+    });
+  }, [onStevieMood, loading, filter.statement, prevStatementSpending, trendPct]);
+
   return (
     <div className="transactions-page">
       <div className="filters transactions-filters-top">
@@ -302,6 +335,7 @@ export function TransactionList({
               : '$0.00'}
             change={filter.statement && prevStatementSpending !== null ? trendPct : undefined}
             invertColor
+            stevieHighlight={stevieStatHighlight}
           />
           <SparkCard
             label="Avg charge"
@@ -372,7 +406,7 @@ export function TransactionList({
             {transactions.map((txn, index) => (
               <tr key={txn.id} className={txn.isCredit ? 'credit-row' : ''}>
                 <td className="txn-index-cell">{index + 1}</td>
-                <td className="date-cell">{txn.transDate}</td>
+                <td className="date-cell">{formatTxnDisplayDate(txn.transDate)}</td>
                 <td className="desc-cell" title={txn.description}>
                   {txn.description}
                 </td>
