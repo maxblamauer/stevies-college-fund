@@ -987,6 +987,19 @@ tr:hover {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+/* Single card: card filter hidden — pack remaining pills to the right (match chart column edge) */
+.dashboard-controls--no-card-filter {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.dashboard-controls--no-card-filter .filter-pill {
+  width: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .dashboard-top-bar {
   display: flex;
   align-items: stretch;
@@ -1016,6 +1029,10 @@ tr:hover {
 
   .dashboard-controls > .filter-pill:nth-child(3) {
     grid-column: 1 / -1;
+  }
+
+  .dashboard-controls--no-card-filter > .filter-pill:nth-child(3) {
+    flex: 1 1 100%;
   }
 }
 
@@ -1198,6 +1215,15 @@ tr:hover {
   .transactions-filters-top--no-year .filter-pill:nth-child(3) {
     grid-column: 1 / -1;
   }
+
+  /* Card filter is first child — shift full-width row to last pill */
+  .transactions-filters-top--with-card.transactions-filters-top--no-year .filter-pill:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+
+  .transactions-filters-top--with-card:not(.transactions-filters-top--no-year) .filter-pill:nth-child(5) {
+    grid-column: 1 / -1;
+  }
 }
 
 /* ===== MOBILE ===== */
@@ -1210,6 +1236,26 @@ tr:hover {
     transform: none;
   }
 
+}
+
+/* ≤1100px: header row gets tight with long titles + tabs; hide h1 (still in user menu, a11y: sr-only). */
+@media (max-width: 1100px) {
+  .app-header-brand {
+    position: relative;
+  }
+
+  .app-header-brand h1 {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+  }
 }
 
 @media (max-width: 640px) {
@@ -1231,10 +1277,6 @@ tr:hover {
     align-self: center;
     min-width: 0;
     gap: 8px;
-  }
-
-  .app-header-brand h1 {
-    font-size: 14px;
   }
 
   .stevie-logo-clip-sm {
@@ -1403,11 +1445,29 @@ tr:hover {
     gap: 0;
     padding: 10px 4px;
     margin: 0;
+  }
+
+  /* Dividers between top-level breakdown items. Using :last-child on .category-bar-row broke
+     collapsed parent groups (parent is sole child of .category-group → no line under "Shopping (4)"). */
+  .category-bars > .category-bar-row {
     border-bottom: 1px solid var(--border);
   }
 
-  .category-bar-row:last-child {
+  .category-bars > .category-group {
+    border-bottom: 1px solid var(--border);
+  }
+
+  .category-bars > *:last-child {
     border-bottom: none;
+  }
+
+  .category-group > .category-bar-row,
+  .category-children .category-bar-row {
+    border-bottom: none;
+  }
+
+  .category-children .category-bar-row:not(:last-child) {
+    border-bottom: 1px solid var(--border);
   }
 
   .category-bar-label {
@@ -1472,6 +1532,14 @@ tr:hover {
   }
 
   .transactions-filters-top--no-year .filter-pill:nth-child(3) {
+    grid-column: 1 / -1;
+  }
+
+  .transactions-filters-top--with-card.transactions-filters-top--no-year .filter-pill:nth-child(4) {
+    grid-column: 1 / -1;
+  }
+
+  .transactions-filters-top--with-card:not(.transactions-filters-top--no-year) .filter-pill:nth-child(5) {
     grid-column: 1 / -1;
   }
 
@@ -1984,6 +2052,166 @@ tr:hover {
   color: var(--text-muted);
 }
 
+/* ===== COLLAPSIBLE CARD GROUPS (Mappings + Upload) ===== */
+.mappings-card-group {
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.mappings-card-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 12px 16px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  transition: background 0.15s;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.mappings-card-group-header:hover {
+  background: color-mix(in srgb, var(--text) 4%, var(--bg-card));
+}
+
+.mappings-card-group-chevron {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-muted);
+  transition: transform 0.15s;
+}
+
+.mappings-card-group-chevron[data-expanded='true'] {
+  transform: rotate(90deg);
+}
+
+.mappings-card-group-label {
+  font-weight: 600;
+  font-size: 13px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mappings-card-group-count {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.mappings-card-group > .table-wrapper,
+.mappings-card-group > .statements-table {
+  margin-top: 0;
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--border);
+}
+
+/* Upload statements table — match Credit Cards: right-align actions column + footer */
+.mappings-card-group > .statements-table th:last-child,
+.mappings-card-group > .statements-table td:last-child {
+  text-align: right;
+  vertical-align: middle;
+}
+
+.mappings-card-group > .statements-table .mapping-cell-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+
+.mappings-card-group > .table-wrapper {
+  box-shadow: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 640px) {
+  .mappings-card-group-header {
+    padding: 12px 14px;
+    gap: 10px;
+  }
+
+  .mappings-card-group-label {
+    font-size: 14px;
+    min-width: 0;
+    text-align: left;
+  }
+
+  .mappings-card-group-count {
+    flex-shrink: 0;
+    font-size: 11px;
+  }
+
+  .mappings-card-group > .table-wrapper {
+    max-width: 100%;
+  }
+
+  .joint-card-toggle {
+    min-height: 44px;
+    padding: 8px 0;
+    align-items: center;
+    font-size: 14px;
+    line-height: 1.3;
+  }
+
+  .joint-card-toggle input[type='checkbox'] {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+  }
+
+  .edit-card-field-hint {
+    font-size: 13px;
+    line-height: 1.4;
+  }
+
+  .upload-modal-dropzone {
+    min-height: 132px;
+    padding: 28px 14px;
+    touch-action: manipulation;
+  }
+
+  .household-option {
+    min-height: 52px;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+  }
+}
+
+.table-action-row {
+  padding: 10px 14px !important;
+  text-align: right;
+}
+
+.table-action-row .btn {
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px dashed var(--border);
+}
+
+.table-action-row .btn:hover {
+  color: var(--text);
+  border-color: var(--text-muted);
+  background: transparent;
+}
+
 /* ===== MODAL (reusable) ===== */
 .modal-backdrop {
   position: fixed;
@@ -2205,7 +2433,8 @@ tr:hover {
 }
 
 .table-wrapper .mapping-cell-actions .btn-xs.btn-destructive,
-.statements-list .statements-table .btn-xs.btn-destructive {
+.statements-list .statements-table .btn-xs.btn-destructive,
+.mappings-card-group > .statements-table .mapping-cell-actions .btn-xs.btn-destructive {
   transition:
     background 0.15s ease,
     border-color 0.15s ease,
@@ -2215,19 +2444,22 @@ tr:hover {
 }
 
 .table-wrapper .mapping-cell-actions .btn-xs.btn-destructive:hover:not(:disabled),
-.statements-list .statements-table .btn-xs.btn-destructive:hover:not(:disabled) {
+.statements-list .statements-table .btn-xs.btn-destructive:hover:not(:disabled),
+.mappings-card-group > .statements-table .mapping-cell-actions .btn-xs.btn-destructive:hover:not(:disabled) {
   box-shadow: 0 3px 14px rgba(0, 0, 0, 0.22);
   transform: translateY(-1px);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .table-wrapper .mapping-cell-actions .btn-xs.btn-destructive,
-  .statements-list .statements-table .btn-xs.btn-destructive {
+  .statements-list .statements-table .btn-xs.btn-destructive,
+  .mappings-card-group > .statements-table .mapping-cell-actions .btn-xs.btn-destructive {
     transition-duration: 0.01ms;
   }
 
   .table-wrapper .mapping-cell-actions .btn-xs.btn-destructive:hover:not(:disabled),
-  .statements-list .statements-table .btn-xs.btn-destructive:hover:not(:disabled) {
+  .statements-list .statements-table .btn-xs.btn-destructive:hover:not(:disabled),
+  .mappings-card-group > .statements-table .mapping-cell-actions .btn-xs.btn-destructive:hover:not(:disabled) {
     transform: none;
   }
 }
@@ -3003,6 +3235,44 @@ tr:hover {
   color: var(--text-muted);
 }
 
+.household-option--selected {
+  border-color: var(--accent, #7b6fc4);
+  background: color-mix(in srgb, var(--accent, #7b6fc4) 8%, var(--bg-card));
+}
+
+.joint-card-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-muted);
+  user-select: none;
+}
+
+.joint-card-toggle input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--accent, #7b6fc4);
+  cursor: pointer;
+}
+
+.joint-card-names {
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.edit-card-field-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
 .household-input {
   width: 100%;
   padding: 10px 14px;
@@ -3365,7 +3635,8 @@ tr:hover {
   }
 }
 
-.add-card-dropzone {
+.add-card-dropzone,
+.upload-modal-dropzone {
   padding: 32px 16px;
   margin-bottom: 12px;
 }

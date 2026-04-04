@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { collection, addDoc, getDocs, deleteDoc, doc, query, where, writeBatch, Timestamp, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
@@ -21,6 +21,7 @@ interface StatementInfo {
   periodEnd: string;
   totalBalance: number;
   filename: string;
+  cardProfileId?: string;
 }
 
 function formatStmtDate(dateStr: string): string {
@@ -42,6 +43,10 @@ export function Upload({ onUploaded, householdId }: Props) {
   const [selectedProfileId, setSelectedProfileId] = useState('');
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [expandedUploadGroups, setExpandedUploadGroups] = useState<Set<string>>(new Set());
+  const [uploadModalCardId, setUploadModalCardId] = useState<string | null>(null);
+  /** Per-household: first load opens all card sections (and Other Statements if needed). */
+  const uploadAccordionInitForHouseholdRef = useRef<string | null>(null);
 
   const fetchStatements = useCallback(async () => {
     const snap = await getDocs(
@@ -61,6 +66,37 @@ export function Upload({ onUploaded, householdId }: Props) {
     fetchStatements();
     fetchCardProfiles();
   }, [fetchStatements, fetchCardProfiles]);
+
+  useEffect(() => {
+    uploadAccordionInitForHouseholdRef.current = null;
+    setExpandedUploadGroups(new Set());
+  }, [householdId]);
+
+  useEffect(() => {
+    if (cardProfiles.length === 0) return;
+    if (uploadAccordionInitForHouseholdRef.current !== householdId) {
+      uploadAccordionInitForHouseholdRef.current = householdId;
+      const next = new Set<string>(cardProfiles.map((p) => p.id!).filter(Boolean));
+      if (statements.some((s) => !s.cardProfileId)) next.add('__general__');
+      setExpandedUploadGroups(next);
+      return;
+    }
+    setExpandedUploadGroups((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const p of cardProfiles) {
+        if (p.id && !next.has(p.id)) {
+          next.add(p.id);
+          changed = true;
+        }
+      }
+      if (statements.some((s) => !s.cardProfileId) && !next.has('__general__')) {
+        next.add('__general__');
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [householdId, cardProfiles, statements]);
 
   const onDrop = useCallback(
     async (files: File[]) => {
@@ -104,6 +140,7 @@ export function Upload({ onUploaded, householdId }: Props) {
           periodEnd: parsed.periodEnd,
           totalBalance: parsed.totalBalance,
           uploadedAt: Timestamp.now(),
+          ...(selectedProfileId ? { cardProfileId: selectedProfileId } : {}),
         });
 
         // Save transactions in batches of 500 (Firestore limit)
@@ -123,6 +160,7 @@ export function Upload({ onUploaded, householdId }: Props) {
               cardholder: txn.cardholder,
               category: txn.category,
               confirmed: txn.confirmed,
+              ...(selectedProfileId ? { cardProfileId: selectedProfileId } : {}),
             });
           }
           await batch.commit();
@@ -140,7 +178,7 @@ export function Upload({ onUploaded, householdId }: Props) {
         setMessage(err instanceof Error ? err.message : 'Failed to parse statement');
       }
     },
-    [onUploaded, householdId, fetchStatements]
+    [onUploaded, householdId, fetchStatements, selectedProfileId, cardProfiles]
   );
 
   const deleteDetailLine = useMemo(() => {
@@ -178,109 +216,221 @@ export function Upload({ onUploaded, householdId }: Props) {
     disabled: status === 'uploading',
   });
 
+  const uploadModalCard = uploadModalCardId ? cardProfiles.find((p) => p.id === uploadModalCardId) : null;
+
+  const openUploadModal = (profileId: string) => {
+    setSelectedProfileId(profileId);
+    setUploadModalCardId(profileId);
+    setStatus('idle');
+    setMessage('');
+  };
+
+  const closeUploadModal = () => {
+    if (status === 'uploading') return;
+    setUploadModalCardId(null);
+  };
+
   return (
     <div className="upload-page">
-      <h2>Upload Statement</h2>
-      <p className="upload-hint">Upload a credit card statement PDF</p>
+      <h2>Statements</h2>
 
-      {cardProfiles.length > 1 && (
-        <div className="card-profile-select">
-          <label htmlFor="card-select">Card: </label>
-          <select
-            id="card-select"
-            value={selectedProfileId}
-            onChange={(e) => setSelectedProfileId(e.target.value)}
-          >
-            <option value="">Select a card...</option>
-            {cardProfiles.map((p) => (
-              <option key={p.id} value={p.id!}>
-                {p.cardLabel} ({p.bankName})
-              </option>
-            ))}
-          </select>
-        </div>
-      )}
+      {cardProfiles.length === 0 ? (
+        <p className="empty-state">No cards set up yet. Add a card from the Mappings tab to start uploading statements.</p>
+      ) : (
+        (() => {
+          // Group statements by card profile
+          const byCard = new Map<string, StatementInfo[]>();
+          const ungrouped: StatementInfo[] = [];
+          for (const s of statements) {
+            if (s.cardProfileId) {
+              if (!byCard.has(s.cardProfileId)) byCard.set(s.cardProfileId, []);
+              byCard.get(s.cardProfileId)!.push(s);
+            } else {
+              ungrouped.push(s);
+            }
+          }
 
-      <div
-        {...getRootProps()}
-        className={`dropzone ${isDragActive ? 'active' : ''} ${status}`}
-      >
-        <input {...getInputProps()} />
+          const toggleGroup = (key: string) => {
+            setExpandedUploadGroups((prev) => {
+              const next = new Set(prev);
+              if (next.has(key)) next.delete(key); else next.add(key);
+              return next;
+            });
+          };
 
-        {status === 'idle' && (
-          <div className="dropzone-content">
-            <div className="dropzone-icon">
-              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" y1="3" x2="12" y2="15" />
-              </svg>
-            </div>
-            <p>{isDragActive ? 'Drop the PDF here...' : 'Drag & drop a PDF here, or click to select'}</p>
-          </div>
-        )}
-
-        {status === 'uploading' && (
-          <div className="dropzone-content">
-            <div className="upload-spinner" />
-            <p className="upload-filename">{fileName}</p>
-            <p>Parsing and categorizing transactions...</p>
-          </div>
-        )}
-
-        {status === 'success' && (
-          <div className="dropzone-content">
-            <div className="upload-check">
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </div>
-            <p>{message}</p>
-          </div>
-        )}
-
-        {status === 'error' && (
-          <div className="dropzone-content">
-            <p className="error-text">{message}</p>
-            <p className="upload-retry">Click or drop to try again</p>
-          </div>
-        )}
-      </div>
-
-      <div className="statements-list">
-        <h3>Upload History</h3>
-        {statements.length === 0 ? (
-          <p className="empty-state">No statements uploaded yet.</p>
-        ) : (
-          <table className="statements-table">
-            <thead>
-              <tr><th>Date</th><th>Period</th><th>Balance</th><th>File</th><th></th></tr>
-            </thead>
-            <tbody>
-              {statements.map((s) => {
-                const r = reconcileBillingPeriod(s.periodStart, s.periodEnd);
+          return (
+            <>
+              {cardProfiles.map((profile) => {
+                const stmts = byCard.get(profile.id!) || [];
+                const isExpanded = expandedUploadGroups.has(profile.id!);
                 return (
-                  <tr key={s.id}>
-                    <td>{formatStmtDate(s.statementDate)}</td>
-                    <td>{r.periodStart} to {r.periodEnd}</td>
-                    <td>{fmtMoney(s.totalBalance)}</td>
-                    <td>{s.filename}</td>
-                    <td>
-                      <button
-                        type="button"
-                        className="btn btn-xs btn-destructive"
-                        onClick={() => setDeleteTargetId(s.id)}
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
+                  <div key={profile.id} className="mappings-card-group">
+                    <button
+                      type="button"
+                      className="mappings-card-group-header"
+                      onClick={() => toggleGroup(profile.id!)}
+                      aria-expanded={isExpanded}
+                    >
+                      <span className="mappings-card-group-chevron" data-expanded={isExpanded}>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                          <polyline points="9 6 15 12 9 18" />
+                        </svg>
+                      </span>
+                      <span className="mappings-card-group-label">{profile.cardLabel} ({profile.bankName})</span>
+                      <span className="mappings-card-group-count">{stmts.length} statement{stmts.length !== 1 ? 's' : ''}</span>
+                    </button>
+                    {isExpanded && (
+                      <table className="statements-table">
+                        <thead>
+                          <tr><th>Date</th><th>Period</th><th>Balance</th><th>File</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                          {stmts.map((s) => {
+                            const r = reconcileBillingPeriod(s.periodStart, s.periodEnd);
+                            return (
+                              <tr key={s.id}>
+                                <td>{formatStmtDate(s.statementDate)}</td>
+                                <td>{r.periodStart} to {r.periodEnd}</td>
+                                <td>{fmtMoney(s.totalBalance)}</td>
+                                <td>{s.filename}</td>
+                                <td className="mapping-cell-actions">
+                                  <button
+                                    type="button"
+                                    className="btn btn-xs btn-destructive"
+                                    onClick={() => setDeleteTargetId(s.id)}
+                                  >
+                                    Remove
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                          <tr>
+                            <td colSpan={5} className="table-action-row">
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-save"
+                                onClick={() => openUploadModal(profile.id!)}
+                              >
+                                + Upload
+                              </button>
+                            </td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
                 );
               })}
-            </tbody>
-          </table>
+              {ungrouped.length > 0 && (
+                <div className="mappings-card-group">
+                  <button
+                    type="button"
+                    className="mappings-card-group-header"
+                    onClick={() => toggleGroup('__general__')}
+                    aria-expanded={expandedUploadGroups.has('__general__')}
+                  >
+                    <span className="mappings-card-group-chevron" data-expanded={expandedUploadGroups.has('__general__')}>
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polyline points="9 6 15 12 9 18" />
+                      </svg>
+                    </span>
+                    <span className="mappings-card-group-label">Other Statements</span>
+                    <span className="mappings-card-group-count">{ungrouped.length} statement{ungrouped.length !== 1 ? 's' : ''}</span>
+                  </button>
+                  {expandedUploadGroups.has('__general__') && (
+                    <table className="statements-table">
+                      <thead>
+                        <tr><th>Date</th><th>Period</th><th>Balance</th><th>File</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {ungrouped.map((s) => {
+                          const r = reconcileBillingPeriod(s.periodStart, s.periodEnd);
+                          return (
+                            <tr key={s.id}>
+                              <td>{formatStmtDate(s.statementDate)}</td>
+                              <td>{r.periodStart} to {r.periodEnd}</td>
+                              <td>{fmtMoney(s.totalBalance)}</td>
+                              <td>{s.filename}</td>
+                              <td className="mapping-cell-actions">
+                                <button
+                                  type="button"
+                                  className="btn btn-xs btn-destructive"
+                                  onClick={() => setDeleteTargetId(s.id)}
+                                >
+                                  Remove
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+            </>
+          );
+        })()
+      )}
+
+      <Modal
+        open={uploadModalCardId !== null}
+        onClose={closeUploadModal}
+        title={uploadModalCard ? `Upload to ${uploadModalCard.cardLabel}` : 'Upload Statement'}
+        description="Drop or select a credit card statement PDF."
+        closeOnBackdropClick={status !== 'uploading'}
+        showCloseButton={status !== 'uploading'}
+      >
+        <ModalBodyPanel>
+          <div
+            {...getRootProps()}
+            className={`dropzone upload-modal-dropzone ${isDragActive ? 'active' : ''} ${status}`}
+          >
+            <input {...getInputProps()} />
+            {status === 'idle' && (
+              <div className="dropzone-content">
+                <div className="dropzone-icon">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                </div>
+                <p>{isDragActive ? 'Drop the PDF here...' : 'Drag & drop a PDF, or click to select'}</p>
+              </div>
+            )}
+            {status === 'uploading' && (
+              <div className="dropzone-content">
+                <div className="upload-spinner" />
+                <p className="upload-filename">{fileName}</p>
+                <p>Parsing and categorizing transactions...</p>
+              </div>
+            )}
+            {status === 'success' && (
+              <div className="dropzone-content">
+                <div className="upload-check">
+                  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </div>
+                <p>{message}</p>
+              </div>
+            )}
+            {status === 'error' && (
+              <div className="dropzone-content">
+                <p className="error-text">{message}</p>
+                <p className="upload-retry">Click or drop to try again</p>
+              </div>
+            )}
+          </div>
+        </ModalBodyPanel>
+        {status === 'success' && (
+          <div className="edit-card-panel-actions">
+            <button type="button" className="btn btn-save" onClick={closeUploadModal}>Done</button>
+          </div>
         )}
-      </div>
+      </Modal>
 
       <Modal
         open={deleteTargetId !== null}

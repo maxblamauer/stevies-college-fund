@@ -252,28 +252,39 @@ function parseGeneric(text: string, mappings: CategoryMapping[]): ParsedStatemen
   const amtPattern = '\\$?([\\d,]+\\.\\d{2})\\s*(CR|cr|-)?';
 
   for (const dp of datePatterns) {
+    let foundTwoDate = false;
+
     // Try: date date description amount (two-date format like BMO)
-    const twoDateRegex = new RegExp(
-      dp + '\\s+' + dp + '\\s+' + '(.+?)\\s+' + amtPattern, 'g'
-    );
-    let match;
-    while ((match = twoDateRegex.exec(fullText)) !== null) {
-      const txn = buildTransaction(match[1], match[2], match[3], match[4], match[5], year, mappings);
-      if (txn && !seen.has(txn.key)) {
-        seen.add(txn.key);
-        transactions.push(txn.parsed);
+    // First with whitespace before amount, then without (pdfjs sometimes merges text)
+    for (const sep of ['\\s+', '']) {
+      const twoDateRegex = new RegExp(
+        dp + '\\s+' + dp + '\\s+' + '(.+?)' + sep + amtPattern, 'g'
+      );
+      let match;
+      while ((match = twoDateRegex.exec(fullText)) !== null) {
+        const txn = buildTransaction(match[1], match[2], match[3], match[4], match[5], year, mappings);
+        if (txn && !seen.has(txn.key)) {
+          seen.add(txn.key);
+          transactions.push(txn.parsed);
+          foundTwoDate = true;
+        }
       }
     }
 
-    // Try: date description amount (single-date format)
-    const oneDateRegex = new RegExp(
-      dp + '\\s+' + '(.+?)\\s+' + amtPattern, 'g'
-    );
-    while ((match = oneDateRegex.exec(fullText)) !== null) {
-      const txn = buildTransaction(match[1], match[1], match[2], match[3], match[4], year, mappings);
-      if (txn && !seen.has(txn.key)) {
-        seen.add(txn.key);
-        transactions.push(txn.parsed);
+    // Only try single-date if two-date didn't find anything
+    if (!foundTwoDate) {
+      for (const sep of ['\\s+', '']) {
+        const oneDateRegex = new RegExp(
+          dp + '\\s+' + '(.+?)' + sep + amtPattern, 'g'
+        );
+        let match;
+        while ((match = oneDateRegex.exec(fullText)) !== null) {
+          const txn = buildTransaction(match[1], match[1], match[2], match[3], match[4], year, mappings);
+          if (txn && !seen.has(txn.key)) {
+            seen.add(txn.key);
+            transactions.push(txn.parsed);
+          }
+        }
       }
     }
   }
@@ -325,7 +336,7 @@ function buildTransaction(
 
   const { category, confirmed } = categorizeTransaction(desc, mappings);
 
-  const key = `${transDate}|${desc}|${amount}`;
+  const key = `${transDate}|${postingDate}|${desc}|${amount}`;
 
   return {
     key,
@@ -405,22 +416,16 @@ function parseWithProfile(
   const sections: Array<{ cardholder: string; text: string }> = [];
 
   if (profile.hasSections && profile.cardholderPatterns.length > 0) {
-    // Find each cardholder's section in the text
+    // Find each cardholder's section: look for "Card number: XXXX ... PATTERN" as section start
+    // to avoid matching the name in the mailing address or other non-transaction areas
     for (let i = 0; i < profile.cardholderPatterns.length; i++) {
       const pattern = profile.cardholderPatterns[i];
       const displayName = profile.cardholders[i] || pattern;
       const patternEscaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-      // Look for text between this cardholder's name and the next (or subtotal)
-      const subtotalPattern = `(?:Subtotal for ${patternEscaped}|Card number:|${
-        profile.cardholderPatterns
-          .filter((_, j) => j !== i)
-          .map((p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-          .join('|') || '$'
-      })`;
-
+      // Match from "Card number: ... PATTERN" to "Subtotal for PATTERN"
       const sectionRegex = new RegExp(
-        `${patternEscaped}([\\s\\S]*?)(?:${subtotalPattern}|$)`,
+        `Card number:.*?${patternEscaped}([\\s\\S]*?)(?:Subtotal for ${patternEscaped}|$)`,
         'i'
       );
       const sectionMatch = fullText.match(sectionRegex);
@@ -449,30 +454,42 @@ function parseWithProfile(
 
   for (const section of sections) {
     for (const dp of datePatterns) {
+      let foundTwoDate = false;
+
       if (profile.useTwoDateFormat) {
-        const twoDateRegex = new RegExp(
-          dp + '\\s+' + dp + '\\s+' + '(.+?)\\s+' + amtPattern, 'g'
-        );
-        let match;
-        while ((match = twoDateRegex.exec(section.text)) !== null) {
-          const txn = buildTransaction(match[1], match[2], match[3], match[4], match[5], year, mappings);
-          if (txn && !seen.has(txn.key)) {
-            seen.add(txn.key);
-            transactions.push({ ...txn.parsed, cardholder: section.cardholder });
+        // Try with whitespace before amount first, then allow no-space (pdfjs sometimes merges text)
+        const twoDateRegexes = [
+          new RegExp(dp + '\\s+' + dp + '\\s+' + '(.+?)\\s+' + amtPattern, 'g'),
+          new RegExp(dp + '\\s+' + dp + '\\s+' + '(.+?)' + amtPattern, 'g'),
+        ];
+        for (const twoDateRegex of twoDateRegexes) {
+          let match;
+          while ((match = twoDateRegex.exec(section.text)) !== null) {
+            const txn = buildTransaction(match[1], match[2], match[3], match[4], match[5], year, mappings);
+            if (txn && !seen.has(txn.key)) {
+              seen.add(txn.key);
+              transactions.push({ ...txn.parsed, cardholder: section.cardholder });
+              foundTwoDate = true;
+            }
           }
         }
       }
 
-      // Always try single-date as fallback
-      const oneDateRegex = new RegExp(
-        dp + '\\s+' + '(.+?)\\s+' + amtPattern, 'g'
-      );
-      let match;
-      while ((match = oneDateRegex.exec(section.text)) !== null) {
-        const txn = buildTransaction(match[1], match[1], match[2], match[3], match[4], year, mappings);
-        if (txn && !seen.has(txn.key)) {
-          seen.add(txn.key);
-          transactions.push({ ...txn.parsed, cardholder: section.cardholder });
+      // Only try single-date if two-date didn't find anything
+      if (!foundTwoDate) {
+        const oneDateRegexes = [
+          new RegExp(dp + '\\s+' + '(.+?)\\s+' + amtPattern, 'g'),
+          new RegExp(dp + '\\s+' + '(.+?)' + amtPattern, 'g'),
+        ];
+        for (const oneDateRegex of oneDateRegexes) {
+          let match;
+          while ((match = oneDateRegex.exec(section.text)) !== null) {
+            const txn = buildTransaction(match[1], match[1], match[2], match[3], match[4], year, mappings);
+            if (txn && !seen.has(txn.key)) {
+              seen.add(txn.key);
+              transactions.push({ ...txn.parsed, cardholder: section.cardholder });
+            }
+          }
         }
       }
     }

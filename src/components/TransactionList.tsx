@@ -20,13 +20,17 @@ interface Transaction {
   cardholder: string;
   category: string;
   confirmed: boolean;
+  cardProfileId?: string;
 }
+
+interface CardProfileInfo { id: string; cardLabel: string; bankName: string; }
 
 interface StatementInfo {
   id: string;
   statementDate: string;
   periodStart: string;
   periodEnd: string;
+  cardProfileId?: string;
 }
 
 interface Props {
@@ -34,8 +38,10 @@ interface Props {
   initialCategory?: string;
   initialStatement?: string;
   initialCardholder?: string;
+  initialCard?: string;
   initialYear?: string;
   onYearChange?: (year: string) => void;
+  onCardChange?: (card: string) => void;
   householdId: string;
   onStevieMood?: (report: StevieMoodReport | null) => void;
   stevieStatHighlight?: 'good' | 'bad' | null;
@@ -74,8 +80,10 @@ export function TransactionList({
   initialCategory = '',
   initialStatement = '',
   initialCardholder = '',
+  initialCard = '',
   initialYear = '',
   onYearChange,
+  onCardChange,
   householdId,
   onStevieMood,
   stevieStatHighlight = null,
@@ -84,12 +92,14 @@ export function TransactionList({
   const [filter, setFilter] = useState({
     category: initialCategory,
     cardholder: initialCardholder,
+    card: initialCard,
     confirmed: '',
     statement: initialStatement,
     year: initialYear,
   });
   const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [statements, setStatements] = useState<StatementInfo[]>([]);
+  const [cardProfiles, setCardProfiles] = useState<CardProfileInfo[]>([]);
   const [loading, setLoading] = useState(true);
 
   const availableYears = useMemo(
@@ -122,10 +132,15 @@ export function TransactionList({
     setStatements(snap.docs.map((d) => ({ id: d.id, ...d.data() } as StatementInfo)));
   };
 
+  const fetchCardProfiles = async () => {
+    const snap = await getDocs(collection(db, 'households', householdId, 'cardProfiles'));
+    setCardProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CardProfileInfo)));
+  };
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      await Promise.all([fetchTransactions(), fetchStatements()]);
+      await Promise.all([fetchTransactions(), fetchStatements(), fetchCardProfiles()]);
       setLoading(false);
     };
     load();
@@ -139,6 +154,8 @@ export function TransactionList({
     }
   }, [allTransactions.length, showYearFilter, filter.year, onYearChange]);
 
+  const showCardFilter = cardProfiles.length > 1;
+
   // Filter client-side to avoid composite index requirements
   useEffect(() => {
     let filtered = allTransactions;
@@ -146,20 +163,22 @@ export function TransactionList({
       filtered = filtered.filter((t) => transactionMatchesCategoryFilter(t.category, filter.category));
     }
     if (filter.cardholder) filtered = filtered.filter((t) => t.cardholder === filter.cardholder);
+    if (filter.card) filtered = filtered.filter((t) => t.cardProfileId === filter.card);
     if (filter.confirmed === 'true') filtered = filtered.filter((t) => t.confirmed);
     if (filter.confirmed === 'false') filtered = filtered.filter((t) => !t.confirmed);
     if (filter.statement) filtered = filtered.filter((t) => t.statementId === filter.statement);
     if (showYearFilter && filter.year) filtered = filtered.filter((t) => t.transDate.startsWith(filter.year));
     setTransactions(filtered);
-  }, [allTransactions, filter, showYearFilter]);
+  }, [allTransactions, filter, showYearFilter, showCardFilter]);
 
   const updateCategory = async (id: string, description: string, newCategory: string) => {
     const pattern = extractMerchantPattern(description);
     const txnRef = doc(db, 'households', householdId, 'transactions', id);
+    const txn = allTransactions.find((t) => t.id === id);
     await updateDoc(txnRef, { category: newCategory, confirmed: true });
 
     if (pattern) {
-      await saveMerchantMapping(pattern, newCategory);
+      await saveMerchantMapping(pattern, newCategory, txn?.cardProfileId);
       await applyMappingToUnconfirmed(pattern, newCategory);
     }
 
@@ -174,7 +193,7 @@ export function TransactionList({
     await updateDoc(txnRef, { confirmed: true });
 
     if (pattern && txn) {
-      await saveMerchantMapping(pattern, txn.category);
+      await saveMerchantMapping(pattern, txn.category, txn.cardProfileId);
     }
 
     fetchTransactions();
@@ -194,7 +213,7 @@ export function TransactionList({
     onUpdate();
   };
 
-  const saveMerchantMapping = async (pattern: string, category: string) => {
+  const saveMerchantMapping = async (pattern: string, category: string, cardProfileId?: string) => {
     // Check if mapping already exists
     const q = query(
       collection(db, 'households', householdId, 'categoryMappings'),
@@ -207,6 +226,7 @@ export function TransactionList({
       await addDoc(collection(db, 'households', householdId, 'categoryMappings'), {
         merchantPattern: pattern,
         category,
+        ...(cardProfileId ? { cardProfileId } : {}),
       });
     }
   };
@@ -238,6 +258,7 @@ export function TransactionList({
   const matchesNonStatementFilters = (t: Transaction) => {
     if (filter.category && !transactionMatchesCategoryFilter(t.category, filter.category)) return false;
     if (filter.cardholder && t.cardholder !== filter.cardholder) return false;
+    if (filter.card && t.cardProfileId !== filter.card) return false;
     if (filter.confirmed === 'true' && !t.confirmed) return false;
     if (filter.confirmed === 'false' && t.confirmed) return false;
     return true;
@@ -272,7 +293,7 @@ export function TransactionList({
   const chargeCount = chargeRows.length;
   const avgCharge = chargeCount > 0 ? totalAmount / chargeCount : 0;
 
-  const hasExtraFilters = Boolean(filter.category || filter.cardholder || filter.confirmed);
+  const hasExtraFilters = Boolean(filter.category || filter.cardholder || filter.card || filter.confirmed);
   const hasAnyFilter = Boolean(filter.statement || hasExtraFilters);
 
   const primaryLabel = filter.statement
@@ -288,6 +309,10 @@ export function TransactionList({
     primarySubtitleParts.push(
       PARENT_CATEGORY_NAMES.includes(filter.category) ? `${filter.category} (all)` : filter.category
     );
+  }
+  if (filter.card) {
+    const cp = cardProfiles.find((p) => p.id === filter.card);
+    if (cp) primarySubtitleParts.push(cp.cardLabel);
   }
   if (filter.cardholder) primarySubtitleParts.push(filter.cardholder.split(' ')[0] || filter.cardholder);
   if (filter.confirmed === 'true') primarySubtitleParts.push('Confirmed');
@@ -317,24 +342,45 @@ export function TransactionList({
   return (
     <div className="transactions-page">
       <div
-        className={
-          showYearFilter
-            ? 'filters transactions-filters-top'
-            : 'filters transactions-filters-top transactions-filters-top--no-year'
-        }
+        className={`filters transactions-filters-top${!showYearFilter ? ' transactions-filters-top--no-year' : ''}${showCardFilter ? ' transactions-filters-top--with-card' : ''}`}
       >
+        {showCardFilter && (
+          <FilterSelect
+            value={filter.card}
+            onChange={(value) => {
+              // Clear statement if it doesn't belong to the new card
+              let newStatement = filter.statement;
+              if (value && filter.statement) {
+                const stmt = statements.find((s) => s.id === filter.statement);
+                if (stmt && stmt.cardProfileId !== value) newStatement = '';
+              }
+              setFilter({ ...filter, card: value, statement: newStatement });
+              onCardChange?.(value);
+            }}
+            options={[
+              { value: '', label: 'All Cards' },
+              ...cardProfiles.map((p) => ({ value: p.id, label: p.cardLabel })),
+            ]}
+          />
+        )}
         <FilterSelect
           value={filter.statement}
           onChange={(value) => setFilter({ ...filter, statement: value })}
           options={[
             { value: '', label: 'All Statements' },
-            ...statements.map((s) => {
-              const r = reconcileBillingPeriod(s.periodStart, s.periodEnd);
-              return {
-                value: s.id,
-                label: `${formatStmtDate(s.statementDate)} (${r.periodStart} to ${r.periodEnd})`,
-              };
-            }),
+            ...statements
+              .filter((s) => !filter.card || s.cardProfileId === filter.card)
+              .map((s) => {
+                const r = reconcileBillingPeriod(s.periodStart, s.periodEnd);
+                const card = showCardFilter && !filter.card && s.cardProfileId
+                  ? cardProfiles.find((p) => p.id === s.cardProfileId)
+                  : null;
+                const cardSuffix = card ? ` · ${card.cardLabel}` : '';
+                return {
+                  value: s.id,
+                  label: `${formatStmtDate(s.statementDate)} (${r.periodStart} to ${r.periodEnd})${cardSuffix}`,
+                };
+              }),
           ]}
         />
         <FilterSelect
@@ -402,7 +448,7 @@ export function TransactionList({
             label="Refunds"
             value={creditAmount > 0 ? `-${creditAmount.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })}` : '$0.00'}
             valueColor={creditAmount > 0 ? 'var(--green)' : undefined}
-            subtitle={filter.category || filter.cardholder || filter.confirmed ? 'In filtered rows' : undefined}
+            subtitle={filter.category || filter.cardholder || filter.card || filter.confirmed ? 'In filtered rows' : undefined}
           />
         </div>
       </div>

@@ -104,8 +104,10 @@ function buildGroupedCategories(byCategory: CategoryStat[]): GroupedCategory[] {
 }
 
 interface CategoryStat { category: string; total: number; count: number; }
-interface StatementInfo { id: string; statementDate: string; periodStart: string; periodEnd: string; totalBalance: number; filename: string; }
-interface TransactionDoc { statementId: string; transDate: string; amount: number; isCredit: boolean; cardholder: string; category: string; }
+interface StatementInfo { id: string; statementDate: string; periodStart: string; periodEnd: string; totalBalance: number; filename: string; cardProfileId?: string; }
+interface TransactionDoc { statementId: string; transDate: string; amount: number; isCredit: boolean; cardholder: string; category: string; cardProfileId?: string; }
+
+interface CardProfileInfo { id: string; cardLabel: string; bankName: string; }
 
 interface Props {
   onCategoryClick: (category: string) => void;
@@ -117,6 +119,8 @@ interface Props {
   onYearChange: (year: string) => void;
   cardholder: string;
   onCardholderChange: (cardholder: string) => void;
+  selectedCard: string;
+  onCardChange: (card: string) => void;
   onStevieMood?: (report: StevieMoodReport | null) => void;
   stevieStatHighlight?: 'good' | 'bad' | null;
 }
@@ -157,6 +161,8 @@ export function Dashboard({
   onYearChange,
   cardholder,
   onCardholderChange,
+  selectedCard,
+  onCardChange,
   onStevieMood,
   stevieStatHighlight = null,
 }: Props) {
@@ -164,6 +170,7 @@ export function Dashboard({
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [statements, setStatements] = useState<StatementInfo[]>([]);
   const [allTransactions, setAllTransactions] = useState<TransactionDoc[]>([]);
+  const [cardProfiles, setCardProfiles] = useState<CardProfileInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [trendHoverX, setTrendHoverX] = useState<number | null>(null);
 
@@ -177,10 +184,15 @@ export function Dashboard({
       const stmts = stmtSnap.docs.map((d) => ({ id: d.id, ...d.data() } as StatementInfo));
       setStatements(stmts);
 
-      // Load all transactions (charges only — exclude credits/refunds for stats)
+      // Load all transactions
       const txnSnap = await getDocs(collection(db, 'households', householdId, 'transactions'));
       const txns = txnSnap.docs.map((d) => d.data() as TransactionDoc);
       setAllTransactions(txns);
+
+      // Load card profiles
+      const cpSnap = await getDocs(collection(db, 'households', householdId, 'cardProfiles'));
+      setCardProfiles(cpSnap.docs.map((d) => ({ id: d.id, ...d.data() } as CardProfileInfo)));
+
       setLoading(false);
     };
     load();
@@ -197,9 +209,12 @@ export function Dashboard({
   }, [showYearFilter, selectedYear, onYearChange]);
 
   // Compute stats from loaded data with filters applied
+  const showCardFilter = cardProfiles.length > 1;
+
   const filteredTxns = allTransactions.filter((t) => {
     if (t.isCredit) return false;
     if (cardholder && t.cardholder !== cardholder) return false;
+    if (selectedCard && t.cardProfileId !== selectedCard) return false;
     if (selectedStatement && t.statementId !== selectedStatement) return false;
     if (showYearFilter && selectedYear && !t.transDate.startsWith(selectedYear)) return false;
     return true;
@@ -218,7 +233,7 @@ export function Dashboard({
       .map(([category, { total, count }]) => ({ category, total, count }))
       .sort((a, b) => b.total - a.total);
     setByCategory(cats);
-  }, [allTransactions, cardholder, selectedStatement, selectedYear]);
+  }, [allTransactions, cardholder, selectedCard, selectedStatement, selectedYear]);
 
   const totalSpending = byCategory.reduce((sum, c) => sum + c.total, 0);
 
@@ -247,11 +262,27 @@ export function Dashboard({
     mainSlices.push({ id: '__grouped__', label, value: Math.round(otherTotal * 100) / 100, color: getColor('Other') });
   }
 
-  // Statement totals for line chart
+  // Statement totals for line chart — only statements that belong to this card (or legacy stmts with
+  // matching txns), so the trend / averages / day span don’t mix in other cards’ periods or $0 points.
   const sortedStmts = [...statements].sort((a, b) => a.statementDate.localeCompare(b.statementDate));
-  const stmtTotals = sortedStmts.map((s) => {
+  const txnMatchesCardScope = (t: TransactionDoc) => {
+    if (t.isCredit) return false;
+    if (cardholder && t.cardholder !== cardholder) return false;
+    if (selectedCard && t.cardProfileId !== selectedCard) return false;
+    if (showYearFilter && selectedYear && !t.transDate.startsWith(selectedYear)) return false;
+    return true;
+  };
+  const chartStmts = selectedCard
+    ? sortedStmts.filter((s) => {
+        if (s.cardProfileId === selectedCard) return true;
+        if (s.cardProfileId) return false;
+        return allTransactions.some((t) => t.statementId === s.id && txnMatchesCardScope(t));
+      })
+    : sortedStmts;
+
+  const stmtTotals = chartStmts.map((s) => {
     const total = allTransactions
-      .filter((t) => t.statementId === s.id && !t.isCredit && (!cardholder || t.cardholder === cardholder))
+      .filter((t) => t.statementId === s.id && txnMatchesCardScope(t))
       .reduce((sum, t) => sum + t.amount, 0);
     return {
       id: s.id,
@@ -275,7 +306,10 @@ export function Dashboard({
 
   const latestTotal = stmtTotals.length > 0 ? stmtTotals[stmtTotals.length - 1].total : 0;
   const prevTotal = stmtTotals.length > 1 ? stmtTotals[stmtTotals.length - 2].total : 0;
-  const spendingChange = stmtTotals.length > 1 ? ((latestTotal - prevTotal) / prevTotal) * 100 : 0;
+  const spendingChange =
+    stmtTotals.length > 1 && prevTotal > 0
+      ? ((latestTotal - prevTotal) / prevTotal) * 100
+      : undefined;
   const selectedStmtIdx = selectedStatement ? stmtTotals.findIndex((s) => s.id === selectedStatement) : -1;
   const selectedStmtTotal = selectedStmtIdx >= 0 ? stmtTotals[selectedStmtIdx].total : 0;
   const selectedPrevTotal = selectedStmtIdx > 0 ? stmtTotals[selectedStmtIdx - 1].total : 0;
@@ -295,12 +329,12 @@ export function Dashboard({
   })();
 
   const focusTotal = focusIdx >= 0 ? stmtTotals[focusIdx].total : 0;
-  const focusStmt = focusIdx >= 0 ? sortedStmts[focusIdx] : null;
+  const focusStmt = focusIdx >= 0 ? chartStmts[focusIdx] : null;
   const focusPeriodDays = focusStmt
     ? billingPeriodInclusiveDays(focusStmt.periodStart, focusStmt.periodEnd)
     : 1;
 
-  const stmtsWithPeriod = sortedStmts.filter((s) => s.periodStart && s.periodEnd);
+  const stmtsWithPeriod = chartStmts.filter((s) => s.periodStart && s.periodEnd);
   const allStatementsSpanDays =
     stmtsWithPeriod.length === 0
       ? 1
@@ -315,7 +349,7 @@ export function Dashboard({
     ? focusIdx >= 0
       ? focusTotal / focusPeriodDays
       : 0
-    : sortedStmts.length > 0
+    : chartStmts.length > 0
       ? totalSpending / allStatementsSpanDays
       : 0;
 
@@ -395,6 +429,13 @@ export function Dashboard({
       onStevieMood(null);
       return;
     }
+    if (spendingChange === undefined || !Number.isFinite(spendingChange)) {
+      onStevieMood({
+        kind: 'neutral',
+        detail: 'Prior statement had no spending in this view to compare.',
+      });
+      return;
+    }
     const pct = spendingChange;
     const good = pct < 0;
     onStevieMood({
@@ -416,22 +457,43 @@ export function Dashboard({
     <div className="dashboard">
       <div className="dashboard-top-bar">
         <div
-          className={
-            showYearFilter ? 'dashboard-controls' : 'dashboard-controls dashboard-controls--two-filters'
-          }
+          className={`dashboard-controls${showCardFilter ? '' : ' dashboard-controls--no-card-filter'}`}
         >
+          {showCardFilter && (
+            <FilterSelect
+              value={selectedCard}
+              onChange={(value) => {
+                onCardChange(value);
+                // Clear statement selection if it doesn't belong to the new card
+                if (value && selectedStatement) {
+                  const stmt = statements.find((s) => s.id === selectedStatement);
+                  if (stmt && stmt.cardProfileId !== value) onStatementChange('');
+                }
+              }}
+              options={[
+                { value: '', label: 'All Cards' },
+                ...cardProfiles.map((p) => ({ value: p.id, label: p.cardLabel })),
+              ]}
+            />
+          )}
           <FilterSelect
             value={selectedStatement}
             onChange={onStatementChange}
             options={[
               { value: '', label: 'All Statements' },
-              ...statements.map((s) => {
-                const r = reconcileBillingPeriod(s.periodStart, s.periodEnd);
-                return {
-                  value: s.id,
-                  label: `${formatStmtDate(s.statementDate)} (${r.periodStart} to ${r.periodEnd})`,
-                };
-              }),
+              ...statements
+                .filter((s) => !selectedCard || s.cardProfileId === selectedCard)
+                .map((s) => {
+                  const r = reconcileBillingPeriod(s.periodStart, s.periodEnd);
+                  const card = showCardFilter && !selectedCard && s.cardProfileId
+                    ? cardProfiles.find((p) => p.id === s.cardProfileId)
+                    : null;
+                  const cardSuffix = card ? ` · ${card.cardLabel}` : '';
+                  return {
+                    value: s.id,
+                    label: `${formatStmtDate(s.statementDate)} (${r.periodStart} to ${r.periodEnd})${cardSuffix}`,
+                  };
+                }),
             ]}
           />
           <FilterSelect
@@ -508,19 +570,19 @@ export function Dashboard({
             <SparkCard
               label="Average"
               value={fmtMoney(avgSpending)}
-              subtitle={`across ${statements.length} statement${statements.length !== 1 ? 's' : ''}`}
+              subtitle={`across ${chartStmts.length} statement${chartStmts.length !== 1 ? 's' : ''}`}
             />
             <SparkCard
               label="Daily average"
               value={
-                sortedStmts.length > 0
+                chartStmts.length > 0
                   ? fmtMoney(Math.round(dailyAverageInPeriod * 100) / 100)
                   : '$0.00'
               }
               subtitle={
                 selectedStatement && focusStmt
                   ? `${focusPeriodDays} day${focusPeriodDays !== 1 ? 's' : ''} in period`
-                  : sortedStmts.length > 0
+                  : chartStmts.length > 0
                     ? `${allStatementsSpanDays} day${allStatementsSpanDays !== 1 ? 's' : ''} across all statements`
                     : undefined
               }
@@ -533,7 +595,53 @@ export function Dashboard({
           </div>
 
           <div className="charts-grid">
-            {!selectedStatement && stmtTotals.length < 2 && (
+            {!selectedStatement && showCardFilter && !selectedCard && (() => {
+              const cardSpending = cardProfiles.map((p) => {
+                const total = filteredTxns
+                  .filter((t) => t.cardProfileId === p.id)
+                  .reduce((sum, t) => sum + t.amount, 0);
+                return { card: p.cardLabel, amount: Math.round(total * 100) / 100 };
+              }).filter((d) => d.amount > 0);
+
+              if (cardSpending.length === 0) return (
+                <div className="chart-card">
+                  <h3>Spending by Card</h3>
+                  <div className="chart-placeholder">
+                    <p>No spending data yet.</p>
+                  </div>
+                </div>
+              );
+
+              return (
+                <div className="chart-card">
+                  <h3>Spending by Card</h3>
+                  <div style={{ height: 340 }}>
+                    <ResponsiveBar
+                      data={cardSpending}
+                      keys={['amount']}
+                      indexBy="card"
+                      margin={{ top: 10, right: 10, bottom: 55, left: 65 }}
+                      padding={0.4}
+                      colors={[isDark ? '#8b7fd4' : '#7b6fc4']}
+                      theme={nivoTheme}
+                      axisLeft={{ format: (v) => `$${Number(v).toLocaleString()}`, tickSize: 0, tickPadding: 8, tickValues: 5 }}
+                      axisBottom={{ tickSize: 0, tickPadding: 12 }}
+                      enableGridX={false}
+                      gridYValues={5}
+                      enableLabel={false}
+                      borderRadius={4}
+                      tooltip={({ indexValue, value }) => (
+                        <div className="nivo-tip">
+                          {indexValue}: <strong>{fmtMoney(value as number)}</strong>
+                        </div>
+                      )}
+                    />
+                  </div>
+                </div>
+              );
+            })()}
+
+            {!selectedStatement && (!showCardFilter || selectedCard) && stmtTotals.length < 2 && (
               <div className="chart-card">
                 <h3>Spending Trend</h3>
                 <div className="chart-placeholder">
@@ -542,7 +650,7 @@ export function Dashboard({
               </div>
             )}
 
-            {!selectedStatement && stmtTotals.length >= 2 && (
+            {!selectedStatement && (!showCardFilter || selectedCard) && stmtTotals.length >= 2 && (
               <div className="chart-card chart-card--overflow-visible">
                 <h3>Spending Trend</h3>
                 <div

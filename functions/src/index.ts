@@ -19,9 +19,10 @@ export const generateMappings = onCall(
       throw new HttpsError('unauthenticated', 'Must be signed in');
     }
 
-    const { descriptions, pdfText } = request.data as {
+    const { descriptions, pdfText, jointCardholders } = request.data as {
       descriptions: string[];
       pdfText?: string;
+      jointCardholders?: string[];
     };
 
     if (!Array.isArray(descriptions) || descriptions.length === 0) {
@@ -41,7 +42,7 @@ export const generateMappings = onCall(
         role: 'user',
         content: `You are analyzing a credit card statement. Do TWO things:
 
-1. ANALYZE THE STATEMENT FORMAT from this PDF text sample:
+1. ANALYZE THE STATEMENT FORMAT from this PDF text sample:${jointCardholders && jointCardholders.length > 0 ? `\n\nIMPORTANT: The user has confirmed this is a joint card with these cardholders (exact names from the statement): ${jointCardholders.join(', ')}. Use these as the cardholderPatterns and set hasSections to true.` : ''}
 """
 ${textSample}
 """

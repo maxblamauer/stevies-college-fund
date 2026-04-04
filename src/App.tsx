@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import type { User } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { useTheme } from './ThemeContext';
 import { Upload } from './components/Upload';
@@ -36,6 +36,7 @@ function App() {
   const [selectedStatement, setSelectedStatement] = useState('');
   const [selectedYear, setSelectedYear] = useState('');
   const [cardholder, setCardholder] = useState('');
+  const [selectedCard, setSelectedCard] = useState('');
   const { theme, setTheme } = useTheme();
   const authUidRef = useRef<string | null>(null);
   const [showMappingOnboarding, setShowMappingOnboarding] = useState(false);
@@ -106,6 +107,14 @@ function App() {
             typeof hData.name === 'string' && hData.name.trim() ? hData.name.trim() : 'Household',
           );
           setInviteCode(hData.inviteCode || '');
+          // Resume onboarding if the household creator hasn't completed it yet
+          if (!hData.onboardingComplete && hData.createdBy === user.uid) {
+            // Check if card profiles already exist (household set up before this flag existed)
+            const cardProfilesSnap = await getDocs(collection(db, 'households', data.householdId, 'cardProfiles'));
+            if (cardProfilesSnap.empty) {
+              setShowMappingOnboarding(true);
+            }
+          }
         } else {
           setHouseholdName('Household');
         }
@@ -341,6 +350,8 @@ function App() {
             onYearChange={setSelectedYear}
             cardholder={cardholder}
             onCardholderChange={setCardholder}
+            selectedCard={selectedCard}
+            onCardChange={setSelectedCard}
             onStevieMood={setStevieMood}
             stevieStatHighlight={stevieStatHighlight}
           />
@@ -352,8 +363,10 @@ function App() {
             initialCategory={categoryFilter}
             initialStatement={selectedStatement}
             initialCardholder={cardholder}
+            initialCard={selectedCard}
             initialYear={selectedYear}
             onYearChange={setSelectedYear}
+            onCardChange={setSelectedCard}
             householdId={householdId}
             onStevieMood={setStevieMood}
             stevieStatHighlight={stevieStatHighlight}

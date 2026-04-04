@@ -1,7 +1,7 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { signOut } from 'firebase/auth';
-import { collection, addDoc, writeBatch, doc, Timestamp, query, where, getDocs } from 'firebase/firestore';
+import { collection, addDoc, writeBatch, doc, Timestamp, query, where, getDocs, getDoc, updateDoc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { auth, db, functions } from '../firebase';
 import { parseStatement, extractText } from '../lib/parser';
@@ -16,7 +16,7 @@ interface Props {
   onComplete: () => void;
 }
 
-type Step = 'label' | 'upload' | 'processing' | 'saving' | 'done';
+type Step = 'cardtype' | 'label' | 'jointnames' | 'upload' | 'processing' | 'saving' | 'done';
 
 interface GenerateResult {
   profile: {
@@ -31,14 +31,30 @@ interface GenerateResult {
 }
 
 export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
-  const [step, setStep] = useState<Step>('label');
+  const [step, setStep] = useState<Step>('cardtype');
   const [cardLabel, setCardLabel] = useState('');
+  const [isJointCard, setIsJointCard] = useState(false);
+  const [jointNames, setJointNames] = useState('');
   const [error, setError] = useState('');
   const [logoRedBadge, setLogoRedBadge] = useState(false);
   const [savedCount, setSavedCount] = useState(0);
   const [savedBank, setSavedBank] = useState('');
   /** After a successful Firestore write, revisiting upload must not duplicate docs. */
   const hasPersistedMappingRef = useRef(false);
+
+  // On mount, check if a card label was already saved (user left after naming their card)
+  useEffect(() => {
+    (async () => {
+      const snap = await getDoc(doc(db, 'households', householdId));
+      if (snap.exists()) {
+        const label = snap.data().onboardingCardLabel;
+        if (typeof label === 'string' && label.trim()) {
+          setCardLabel(label);
+          setStep('upload');
+        }
+      }
+    })();
+  }, [householdId]);
 
   const onDrop = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -78,27 +94,52 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
 
       // One-time AI call: analyze format + categorize merchants
       const descriptions = Array.from(merchantMap.values());
+      // Parse joint cardholder names provided by user
+      const userCardholderPatterns = isJointCard
+        ? jointNames.split(',').map((s) => s.trim()).filter(Boolean)
+        : [];
+
       const generateMappings = httpsCallable<
-        { descriptions: string[]; pdfText: string },
+        { descriptions: string[]; pdfText: string; jointCardholders?: string[] },
         GenerateResult
       >(functions, 'generateMappings');
 
-      const result = await generateMappings({ descriptions, pdfText });
+      const result = await generateMappings({
+        descriptions,
+        pdfText,
+        ...(userCardholderPatterns.length > 0 ? { jointCardholders: userCardholderPatterns } : {}),
+      });
 
       // Save everything
       setStep('saving');
 
-      // Save card profile
+      // Save card profile — override cardholders with user-provided joint names if available
+      const aiCardholders = result.data.profile.cardholders || [];
+      const aiPatterns = result.data.profile.cardholderPatterns || [];
+
+      // If user specified joint cardholders, use those as patterns and derive display names
+      const finalPatterns = userCardholderPatterns.length > 0
+        ? userCardholderPatterns
+        : aiPatterns;
+      const finalCardholders = userCardholderPatterns.length > 0
+        ? userCardholderPatterns.map((p) =>
+            p.replace(/^(MR|MRS|MS|MISS|DR)\s+/i, '')
+              .split(' ')
+              .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+              .join(' ')
+          )
+        : aiCardholders;
+
       const profile: Omit<CardProfile, 'id'> = {
         cardLabel: cardLabel.trim(),
         bankName: result.data.profile.bankName || 'Unknown',
-        cardholders: result.data.profile.cardholders || [],
-        cardholderPatterns: result.data.profile.cardholderPatterns || [],
-        hasSections: result.data.profile.hasSections ?? false,
+        cardholders: finalCardholders,
+        cardholderPatterns: finalPatterns,
+        hasSections: userCardholderPatterns.length > 1 || (result.data.profile.hasSections ?? false),
         useTwoDateFormat: result.data.profile.useTwoDateFormat ?? true,
         creditIndicator: result.data.profile.creditIndicator || 'CR',
       };
-      await addDoc(collection(db, 'households', householdId, 'cardProfiles'), profile);
+      const cardProfileRef = await addDoc(collection(db, 'households', householdId, 'cardProfiles'), profile);
 
       // Build a lookup from Claude's response: lowercase description snippet → category
       const claudeCategories = new Map<string, string>();
@@ -140,7 +181,7 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
         // Don't save "Other" mappings — let the built-in keyword engine handle those
         if (category === 'Other') continue;
 
-        await addDoc(mappingsCol, { merchantPattern: pattern, category });
+        await addDoc(mappingsCol, { merchantPattern: pattern, category, cardProfileId: cardProfileRef.id });
         count++;
       }
 
@@ -173,6 +214,7 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
           periodEnd: reParsed.periodEnd,
           totalBalance: reParsed.totalBalance,
           uploadedAt: Timestamp.now(),
+          cardProfileId: cardProfileRef.id,
         });
 
         // Save transactions in batches of 500
@@ -192,6 +234,7 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
               cardholder: txn.cardholder,
               category: txn.category,
               confirmed: txn.confirmed,
+              cardProfileId: cardProfileRef.id,
             });
           }
           await batch.commit();
@@ -207,7 +250,7 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
       setError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
       setStep('upload');
     }
-  }, [householdId, cardLabel]);
+  }, [householdId, cardLabel, isJointCard, jointNames]);
 
   const switchGoogleAccount = async () => {
     setError('');
@@ -218,9 +261,23 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
     }
   };
 
-  const proceedToUpload = () => {
+  const proceedFromLabel = async () => {
     if (!cardLabel.trim()) {
       setError('Give your card a name');
+      return;
+    }
+    setError('');
+    await updateDoc(doc(db, 'households', householdId), { onboardingCardLabel: cardLabel.trim() });
+    if (isJointCard) {
+      setStep('jointnames');
+    } else {
+      setStep('upload');
+    }
+  };
+
+  const proceedFromJointNames = () => {
+    if (!jointNames.trim()) {
+      setError('Enter the cardholder names from the statement');
       return;
     }
     setError('');
@@ -265,6 +322,32 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
               </h1>
             </div>
 
+            {step === 'cardtype' && (
+              <>
+                <p className="login-subtitle household-subtitle">
+                  Is this card used by more than one person?
+                </p>
+                <div className="household-options">
+                  <button
+                    type="button"
+                    className="household-option"
+                    onClick={() => { setIsJointCard(false); setJointNames(''); setStep('label'); }}
+                  >
+                    <strong>Just me</strong>
+                    <span>Only one cardholder on this account</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="household-option"
+                    onClick={() => { setIsJointCard(true); setStep('label'); }}
+                  >
+                    <strong>Joint card</strong>
+                    <span>Two or more cardholders share this account</span>
+                  </button>
+                </div>
+              </>
+            )}
+
             {step === 'label' && (
               <>
                 <p className="login-subtitle household-subtitle">
@@ -276,13 +359,37 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
                   placeholder="e.g. BMO Mastercard"
                   value={cardLabel}
                   onChange={(e) => setCardLabel(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && proceedToUpload()}
+                  onKeyDown={(e) => e.key === 'Enter' && proceedFromLabel()}
                   autoFocus
                 />
                 {error && <p className="login-error household-inline-error">{error}</p>}
                 <div className="household-actions household-actions--single-primary">
-                  <button type="button" className="btn btn-save" onClick={proceedToUpload}>
-                    Add
+                  <button type="button" className="btn btn-save" onClick={proceedFromLabel}>
+                    Next
+                  </button>
+                </div>
+              </>
+            )}
+
+            {step === 'jointnames' && (
+              <>
+                <p className="login-subtitle household-subtitle">
+                  Enter each cardholder&apos;s name exactly as it appears on the statement
+                </p>
+                <input
+                  type="text"
+                  className="household-input"
+                  placeholder="e.g. MR MAX BLAMAUER, MRS KATHRYN PEDDAR"
+                  value={jointNames}
+                  onChange={(e) => setJointNames(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && proceedFromJointNames()}
+                  autoFocus
+                />
+                <p className="hint">Comma-separated, used to split transactions by cardholder</p>
+                {error && <p className="login-error household-inline-error">{error}</p>}
+                <div className="household-actions household-actions--single-primary">
+                  <button type="button" className="btn btn-save" onClick={proceedFromJointNames}>
+                    Next
                   </button>
                 </div>
               </>
@@ -339,7 +446,10 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
                   </p>
                 </div>
                 <div className="household-actions">
-                  <button type="button" className="btn btn-save" onClick={onComplete}>
+                  <button type="button" className="btn btn-save" onClick={async () => {
+                    await updateDoc(doc(db, 'households', householdId), { onboardingComplete: true });
+                    onComplete();
+                  }}>
                     Get Started
                   </button>
                 </div>
@@ -352,7 +462,7 @@ export function OnboardingMappingSetup({ householdId, onComplete }: Props) {
               )}
           </div>
 
-          {(step === 'label' || step === 'upload') && (
+          {(step === 'cardtype' || step === 'label' || step === 'jointnames' || step === 'upload') && (
             <div className="household-card-footer">
               <button type="button" className="household-setup-account-back" onClick={() => void switchGoogleAccount()}>
                 Use a different Google account

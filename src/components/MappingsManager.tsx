@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { collection, getDocs, deleteDoc, doc, orderBy, query, addDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, deleteDoc, doc, orderBy, query, addDoc, updateDoc, writeBatch, where, Timestamp } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { db, functions } from '../firebase';
 import { useDropzone } from 'react-dropzone';
@@ -14,6 +14,7 @@ interface Mapping {
   id: string;
   merchantPattern: string;
   category: string;
+  cardProfileId?: string;
 }
 
 interface Props {
@@ -46,6 +47,8 @@ export function MappingsManager({ householdId }: Props) {
   const [editCardLabel, setEditCardLabel] = useState('');
   const [editBankName, setEditBankName] = useState('');
   const [editCardholders, setEditCardholders] = useState('');
+  const [editCardholderPatterns, setEditCardholderPatterns] = useState('');
+  const [editHasSections, setEditHasSections] = useState(false);
   const [editCardError, setEditCardError] = useState('');
 
   const [editingMappingId, setEditingMappingId] = useState<string | null>(null);
@@ -57,6 +60,7 @@ export function MappingsManager({ householdId }: Props) {
     { kind: 'card'; id: string } | { kind: 'mapping'; id: string } | null
   >(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [expandedMappingGroups, setExpandedMappingGroups] = useState<Set<string>>(new Set());
 
   const categorySelectOptions = useMemo((): { value: string; label: string }[] => {
     const seen = new Set<string>([...CATEGORIES]);
@@ -218,7 +222,7 @@ export function MappingsManager({ householdId }: Props) {
         useTwoDateFormat: result.data.profile.useTwoDateFormat ?? true,
         creditIndicator: result.data.profile.creditIndicator || 'CR',
       };
-      await addDoc(collection(db, 'households', householdId, 'cardProfiles'), profile);
+      const cardProfileRef = await addDoc(collection(db, 'households', householdId, 'cardProfiles'), profile);
 
       // Build Claude category lookup
       const claudeCategories = new Map<string, string>();
@@ -255,11 +259,69 @@ export function MappingsManager({ householdId }: Props) {
         // Don't save "Other" mappings — let the built-in keyword engine handle those
         if (category === 'Other') continue;
 
-        await addDoc(mappingsCol, { merchantPattern: pattern, category });
+        await addDoc(mappingsCol, { merchantPattern: pattern, category, cardProfileId: cardProfileRef.id });
         count++;
       }
 
-      setAddCardResult(`${profile.bankName} card added with ${count} new mappings.`);
+      // Re-parse with new profile + all mappings, then save statement & transactions
+      const allMappingsSnap = await getDocs(collection(db, 'households', householdId, 'categoryMappings'));
+      const allMappings = allMappingsSnap.docs.map((d) => d.data() as { merchantPattern: string; category: string });
+
+      // Keep a copy of bytes for re-parse (pdfjs detaches ArrayBuffer)
+      const fileBytes = new Uint8Array(buffer.slice(0));
+      let reParsed = await parseStatement(new Uint8Array(fileBytes), allMappings, profile as CardProfile);
+      if (reParsed.transactions.length === 0) {
+        reParsed = await parseStatement(new Uint8Array(fileBytes), allMappings);
+      }
+
+      let txnCount = 0;
+      // Check for duplicate statement
+      const existingStmtSnap = reParsed.statementDate
+        ? await getDocs(
+            query(
+              collection(db, 'households', householdId, 'statements'),
+              where('statementDate', '==', reParsed.statementDate)
+            )
+          )
+        : null;
+
+      if ((!existingStmtSnap || existingStmtSnap.empty) && reParsed.transactions.length > 0) {
+        const stmtRef = await addDoc(collection(db, 'households', householdId, 'statements'), {
+          filename: files[0].name,
+          statementDate: reParsed.statementDate,
+          periodStart: reParsed.periodStart,
+          periodEnd: reParsed.periodEnd,
+          totalBalance: reParsed.totalBalance,
+          uploadedAt: Timestamp.now(),
+          cardProfileId: cardProfileRef.id,
+        });
+
+        const txnCol = collection(db, 'households', householdId, 'transactions');
+        for (let i = 0; i < reParsed.transactions.length; i += 500) {
+          const batch = writeBatch(db);
+          const chunk = reParsed.transactions.slice(i, i + 500);
+          for (const txn of chunk) {
+            const ref = doc(txnCol);
+            batch.set(ref, {
+              statementId: stmtRef.id,
+              transDate: txn.transDate,
+              postingDate: txn.postingDate,
+              description: txn.description,
+              amount: txn.amount,
+              isCredit: txn.isCredit,
+              cardholder: txn.cardholder,
+              category: txn.category,
+              confirmed: txn.confirmed,
+              cardProfileId: cardProfileRef.id,
+            });
+          }
+          await batch.commit();
+        }
+        txnCount = reParsed.transactions.length;
+      }
+
+      const txnMsg = txnCount > 0 ? ` and ${txnCount} transactions imported` : '';
+      setAddCardResult(`${profile.bankName} card added with ${count} new mappings${txnMsg}.`);
       setAddCardStep('done');
       fetchCardProfiles();
       fetchMappings();
@@ -294,6 +356,8 @@ export function MappingsManager({ householdId }: Props) {
     setEditCardLabel(p.cardLabel);
     setEditBankName(p.bankName);
     setEditCardholders(p.cardholders.join(', '));
+    setEditCardholderPatterns(p.cardholderPatterns.join(', '));
+    setEditHasSections(p.hasSections);
     setEditCardError('');
   };
 
@@ -326,11 +390,17 @@ export function MappingsManager({ householdId }: Props) {
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
+    const patterns = editCardholderPatterns
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     try {
       await updateDoc(doc(db, 'households', householdId, 'cardProfiles', editingCardId), {
         cardLabel: label,
         bankName: editBankName.trim() || 'Unknown',
         cardholders: holders,
+        cardholderPatterns: patterns,
+        hasSections: editHasSections,
       });
       setEditingCardId(null);
       fetchCardProfiles();
@@ -343,58 +413,58 @@ export function MappingsManager({ householdId }: Props) {
   return (
     <div className="mappings-page">
       {/* Card Profiles Section */}
-      <h2>Cards</h2>
+      <h2>Credit Cards</h2>
       <p className="hint">
         Card profiles tell the parser how to read each credit card's statement format.
       </p>
 
-      {cardProfiles.length > 0 ? (
-        <div className="table-wrapper">
-          <table className="transactions-table mappings-cards-table">
-            <thead>
-              <tr>
-                <th>Card</th>
-                <th>Bank</th>
-                <th>Cardholders</th>
-                <th></th>
+      <div className="table-wrapper">
+        <table className="transactions-table mappings-cards-table">
+          <thead>
+            <tr>
+              <th>Card</th>
+              <th>Bank</th>
+              <th>Cardholders</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {cardProfiles.map((p) => (
+              <tr key={p.id}>
+                <td className="mapping-cell-primary">
+                  <strong>{p.cardLabel}</strong>
+                </td>
+                <td className="mapping-cell-meta">{p.bankName}</td>
+                <td className="mapping-cell-meta2">{p.cardholders.join(', ') || '—'}</td>
+                <td className="mapping-cell-actions">
+                  <button type="button" className="btn btn-xs" onClick={() => startEditCard(p)}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-destructive"
+                    onClick={() => setDeleteTarget({ kind: 'card', id: p.id })}
+                  >
+                    Remove
+                  </button>
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {cardProfiles.map((p) => (
-                <tr key={p.id}>
-                  <td className="mapping-cell-primary">
-                    <strong>{p.cardLabel}</strong>
-                  </td>
-                  <td className="mapping-cell-meta">{p.bankName}</td>
-                  <td className="mapping-cell-meta2">{p.cardholders.join(', ') || '—'}</td>
-                  <td className="mapping-cell-actions">
-                    <button type="button" className="btn btn-xs" onClick={() => startEditCard(p)}>
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-xs btn-destructive"
-                      onClick={() => setDeleteTarget({ kind: 'card', id: p.id })}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : addCardStep === 'idle' ? (
-        <p className="empty-state">
-          No cards set up yet. Add a card to enable smart statement parsing.
-        </p>
-      ) : null}
-
-      {addCardStep === 'idle' && (
-        <button type="button" className="btn btn-save add-card-btn" onClick={startAddCard}>
-          + Add Card
-        </button>
-      )}
+            ))}
+            <tr>
+              <td colSpan={4} className="table-action-row">
+                <button
+                  type="button"
+                  className="btn btn-xs btn-save"
+                  onClick={startAddCard}
+                  disabled={addCardStep !== 'idle'}
+                >
+                  + Add Card
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
 
       <Modal
         open={addCardStep !== 'idle'}
@@ -513,7 +583,7 @@ export function MappingsManager({ householdId }: Props) {
       <p className="hint">
         These are merchant-to-category rules. When you confirm or edit
         a transaction's category, the merchant pattern is saved here. Future uploads will
-        auto-match these patterns. Matching is case-insensitive and uses substring search on descriptions.
+        auto-match these patterns.
       </p>
 
       {mappings.length === 0 ? (
@@ -521,52 +591,109 @@ export function MappingsManager({ householdId }: Props) {
           No custom mappings yet. Confirm or edit transaction categories from the Transactions tab to build rules here.
         </p>
       ) : (
-        <div className="table-wrapper">
-          <table className="transactions-table mappings-rules-table">
-            <thead>
-              <tr>
-                <th>Merchant Pattern</th>
-                <th>Category</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {mappings.map((m) => (
-                <tr key={m.id}>
-                  <td className="mapping-pattern-cell">
-                    <code className="mapping-pattern-badge">{m.merchantPattern}</code>
-                  </td>
-                  <td className="mapping-category-cell">
-                    <span
-                      className={`category-badge cat-${m.category.toLowerCase().replace(/[^a-z]/g, '-')}`}
-                    >
-                      {m.category}
-                    </span>
-                  </td>
-                  <td className="mapping-cell-actions">
-                    <button type="button" className="btn btn-xs" onClick={() => startEditMapping(m)}>
-                      Edit
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-xs btn-destructive"
-                      onClick={() => setDeleteTarget({ kind: 'mapping', id: m.id })}
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        (() => {
+          // Group mappings by card
+          const byCard = new Map<string, Mapping[]>();
+          const ungrouped: Mapping[] = [];
+          for (const m of mappings) {
+            if (m.cardProfileId) {
+              if (!byCard.has(m.cardProfileId)) byCard.set(m.cardProfileId, []);
+              byCard.get(m.cardProfileId)!.push(m);
+            } else {
+              ungrouped.push(m);
+            }
+          }
+          const groups: { key: string; label: string; items: Mapping[] }[] = [];
+          for (const [profileId, items] of byCard) {
+            const profile = cardProfiles.find((p) => p.id === profileId);
+            groups.push({
+              key: profileId,
+              label: profile ? `${profile.cardLabel} (${profile.bankName})` : 'Unknown Card',
+              items,
+            });
+          }
+          if (ungrouped.length > 0) {
+            groups.push({ key: '__general__', label: 'General', items: ungrouped });
+          }
+
+          const toggleGroup = (key: string) => {
+            setExpandedMappingGroups((prev) => {
+              const next = new Set(prev);
+              if (next.has(key)) next.delete(key); else next.add(key);
+              return next;
+            });
+          };
+
+          return groups.map((group) => {
+            const isExpanded = expandedMappingGroups.has(group.key);
+            return (
+              <div key={group.key} className="mappings-card-group">
+                <button
+                  type="button"
+                  className="mappings-card-group-header"
+                  onClick={() => toggleGroup(group.key)}
+                  aria-expanded={isExpanded}
+                >
+                  <span className="mappings-card-group-chevron" data-expanded={isExpanded}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <polyline points="9 6 15 12 9 18" />
+                    </svg>
+                  </span>
+                  <span className="mappings-card-group-label">{group.label}</span>
+                  <span className="mappings-card-group-count">{group.items.length} mapping{group.items.length !== 1 ? 's' : ''}</span>
+                </button>
+                {isExpanded && (
+                  <div className="table-wrapper">
+                    <table className="transactions-table mappings-rules-table">
+                      <thead>
+                        <tr>
+                          <th>Merchant Pattern</th>
+                          <th>Category</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.items.map((m) => (
+                          <tr key={m.id}>
+                            <td className="mapping-pattern-cell">
+                              <code className="mapping-pattern-badge">{m.merchantPattern}</code>
+                            </td>
+                            <td className="mapping-category-cell">
+                              <span
+                                className={`category-badge cat-${m.category.toLowerCase().replace(/[^a-z]/g, '-')}`}
+                              >
+                                {m.category}
+                              </span>
+                            </td>
+                            <td className="mapping-cell-actions">
+                              <button type="button" className="btn btn-xs" onClick={() => startEditMapping(m)}>
+                                Edit
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-xs btn-destructive"
+                                onClick={() => setDeleteTarget({ kind: 'mapping', id: m.id })}
+                              >
+                                Remove
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            );
+          });
+        })()
       )}
 
       <Modal
         open={editingCardId !== null}
         onClose={cancelEditCard}
         title="Editing this card"
-        description="Display names only — statement parser rules stay as when you added the card."
+        description="Re-upload statements after changing parser settings for them to take effect."
       >
         <ModalBodyPanel>
           <div className="edit-card-panel-fields">
@@ -593,10 +720,29 @@ export function MappingsManager({ householdId }: Props) {
               <input
                 type="text"
                 className="household-input"
-                placeholder="Comma-separated names"
+                placeholder="Comma-separated names, e.g. Max Blamauer, Kathryn Peddar"
                 value={editCardholders}
                 onChange={(e) => setEditCardholders(e.target.value)}
               />
+            </label>
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">Statement patterns</span>
+              <input
+                type="text"
+                className="household-input"
+                placeholder="Exact text from PDF, e.g. MR MAX BLAMAUER, MRS KATHRYN PEDDAR"
+                value={editCardholderPatterns}
+                onChange={(e) => setEditCardholderPatterns(e.target.value)}
+              />
+              <span className="edit-card-field-hint">The exact names as printed on the statement, used to split transactions by cardholder.</span>
+            </label>
+            <label className="joint-card-toggle">
+              <input
+                type="checkbox"
+                checked={editHasSections}
+                onChange={(e) => setEditHasSections(e.target.checked)}
+              />
+              <span>Statement has separate sections per cardholder</span>
             </label>
           </div>
         </ModalBodyPanel>
