@@ -43,6 +43,22 @@ export interface CardProfile {
   creditIndicator: string;      // "CR", "-", etc.
 }
 
+export interface FixedExpense {
+  id?: string;
+  label: string;
+  amount: number;
+  category: string;
+  frequency: 'monthly';
+  startDate: string;   // YYYY-MM-DD
+  endDate?: string;     // YYYY-MM-DD, optional — ongoing if not set
+}
+
+export interface IncomeSource {
+  id?: string;
+  person: string;
+  amount: number;        // monthly amount
+}
+
 export const CATEGORIES = [
   'Groceries',
   'Restaurants & Dining',

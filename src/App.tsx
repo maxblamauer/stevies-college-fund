@@ -19,7 +19,7 @@ import './App.css';
 
 const APP_BRAND_NAME = 'Stevies College Fund';
 
-type Tab = 'dashboard' | 'transactions' | 'upload' | 'mappings';
+type Tab = 'dashboard' | 'transactions' | 'upload' | 'settings';
 
 function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -37,7 +37,14 @@ function App() {
   const [selectedYear, setSelectedYear] = useState('');
   const [cardholder, setCardholder] = useState('');
   const [selectedCard, setSelectedCard] = useState('');
+  const [includeFixedExpenses, setIncludeFixedExpenses] = useState(true);
+  const [blurAmounts, setBlurAmounts] = useState(() => localStorage.getItem('blurAmounts') === 'true');
   const { theme, setTheme } = useTheme();
+
+  const toggleBlurAmounts = (v: boolean) => {
+    setBlurAmounts(v);
+    localStorage.setItem('blurAmounts', String(v));
+  };
   const authUidRef = useRef<string | null>(null);
   const [showMappingOnboarding, setShowMappingOnboarding] = useState(false);
   const [stevieMood, setStevieMood] = useState<StevieMoodReport | null>(null);
@@ -77,7 +84,7 @@ function App() {
     setSteviePopoverOpen(false);
     // Keep mood when moving between Dashboard ↔ Transactions (same filters in App state).
     // Only clear when leaving those tabs so Upload/Mappings don’t show a stale trend face.
-    if (activeTab !== 'dashboard' && activeTab !== 'transactions') {
+    if (activeTab !== 'dashboard' && activeTab !== 'transactions' && activeTab !== 'settings') {
       setStevieMood(null);
     }
   }, [activeTab]);
@@ -243,7 +250,7 @@ function App() {
           <h1>{householdName}</h1>
         </div>
         <nav className="tabs">
-          {(['dashboard', 'transactions', 'upload', 'mappings'] as Tab[]).map((tab) => (
+          {(['dashboard', 'transactions', 'upload', 'settings'] as Tab[]).map((tab) => (
             <button
               key={tab}
               className={`tab ${activeTab === tab ? 'active' : ''}`}
@@ -354,6 +361,9 @@ function App() {
             onCardChange={setSelectedCard}
             onStevieMood={setStevieMood}
             stevieStatHighlight={stevieStatHighlight}
+            includeFixedExpenses={includeFixedExpenses}
+            onIncludeFixedExpensesChange={setIncludeFixedExpenses}
+            blurAmounts={blurAmounts}
           />
         )}
         {activeTab === 'transactions' && (
@@ -370,6 +380,8 @@ function App() {
             householdId={householdId}
             onStevieMood={setStevieMood}
             stevieStatHighlight={stevieStatHighlight}
+            includeFixedExpenses={includeFixedExpenses}
+            onIncludeFixedExpensesChange={setIncludeFixedExpenses}
           />
         )}
         {activeTab === 'upload' && (
@@ -385,7 +397,14 @@ function App() {
             householdId={householdId}
           />
         )}
-        {activeTab === 'mappings' && <MappingsManager key={refreshKey} householdId={householdId} />}
+        {activeTab === 'settings' && (
+          <MappingsManager
+            key={refreshKey}
+            householdId={householdId}
+            blurAmounts={blurAmounts}
+            onBlurAmountsChange={toggleBlurAmounts}
+          />
+        )}
       </main>
     </div>
   );

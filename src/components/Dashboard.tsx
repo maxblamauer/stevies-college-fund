@@ -8,6 +8,8 @@ import { SparkCard } from './ui/SparkCard';
 import { FilterSelect } from './ui/FilterSelect';
 import { billingPeriodInclusiveDays, reconcileBillingPeriod } from '../lib/statementPeriod';
 import { CHILD_TO_PARENT } from '../lib/categoryGroups';
+import { generateFixedExpenseTransactions, monthlyFixedTotal } from '../lib/fixedExpenses';
+import type { FixedExpense, IncomeSource } from '../types';
 import type { StevieMoodReport } from '../lib/stevieMood';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -123,6 +125,9 @@ interface Props {
   onCardChange: (card: string) => void;
   onStevieMood?: (report: StevieMoodReport | null) => void;
   stevieStatHighlight?: 'good' | 'bad' | null;
+  includeFixedExpenses: boolean;
+  onIncludeFixedExpensesChange: (value: boolean) => void;
+  blurAmounts: boolean;
 }
 
 function fmtMoney(n: number): string {
@@ -165,12 +170,17 @@ export function Dashboard({
   onCardChange,
   onStevieMood,
   stevieStatHighlight = null,
+  includeFixedExpenses,
+  onIncludeFixedExpensesChange,
+  blurAmounts,
 }: Props) {
   const [byCategory, setByCategory] = useState<CategoryStat[]>([]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [statements, setStatements] = useState<StatementInfo[]>([]);
   const [allTransactions, setAllTransactions] = useState<TransactionDoc[]>([]);
   const [cardProfiles, setCardProfiles] = useState<CardProfileInfo[]>([]);
+  const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
+  const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([]);
   const [loading, setLoading] = useState(true);
   const [trendHoverX, setTrendHoverX] = useState<number | null>(null);
 
@@ -193,6 +203,22 @@ export function Dashboard({
       const cpSnap = await getDocs(collection(db, 'households', householdId, 'cardProfiles'));
       setCardProfiles(cpSnap.docs.map((d) => ({ id: d.id, ...d.data() } as CardProfileInfo)));
 
+      // Load fixed expenses
+      try {
+        const feSnap = await getDocs(collection(db, 'households', householdId, 'fixedExpenses'));
+        setFixedExpenses(feSnap.docs.map((d) => ({ id: d.id, ...d.data() } as FixedExpense)));
+      } catch {
+        setFixedExpenses([]);
+      }
+
+      // Load income sources
+      try {
+        const incSnap = await getDocs(collection(db, 'households', householdId, 'incomeSources'));
+        setIncomeSources(incSnap.docs.map((d) => ({ id: d.id, ...d.data() } as IncomeSource)));
+      } catch {
+        setIncomeSources([]);
+      }
+
       setLoading(false);
     };
     load();
@@ -211,7 +237,7 @@ export function Dashboard({
   // Compute stats from loaded data with filters applied
   const showCardFilter = cardProfiles.length > 1;
 
-  const filteredTxns = allTransactions.filter((t) => {
+  const filteredCardTxns = allTransactions.filter((t) => {
     if (t.isCredit) return false;
     if (cardholder && t.cardholder !== cardholder) return false;
     if (selectedCard && t.cardProfileId !== selectedCard) return false;
@@ -219,6 +245,44 @@ export function Dashboard({
     if (showYearFilter && selectedYear && !t.transDate.startsWith(selectedYear)) return false;
     return true;
   });
+
+  // Generate synthetic fixed expense transactions if toggle is on
+  const fixedTxns = (() => {
+    if (!includeFixedExpenses || fixedExpenses.length === 0) return [];
+    if (statements.length === 0) return [];
+
+    let rangeStart: string;
+    let rangeEnd: string;
+
+    if (selectedStatement) {
+      // Scope to the selected statement's billing period
+      const stmt = statements.find((s) => s.id === selectedStatement);
+      if (!stmt || !stmt.periodStart || !stmt.periodEnd) return [];
+      const r = reconcileBillingPeriod(stmt.periodStart, stmt.periodEnd);
+      rangeStart = r.periodStart;
+      rangeEnd = r.periodEnd;
+    } else {
+      // Use full range across all statements
+      const allDates = statements.map((s) => s.statementDate).sort();
+      const reconciled = statements
+        .filter((s) => s.periodStart && s.periodEnd)
+        .map((s) => reconcileBillingPeriod(s.periodStart, s.periodEnd));
+      rangeStart = reconciled.length > 0
+        ? reconciled.reduce((min, r) => r.periodStart < min ? r.periodStart : min, reconciled[0].periodStart)
+        : allDates[0];
+      rangeEnd = reconciled.length > 0
+        ? reconciled.reduce((max, r) => r.periodEnd > max ? r.periodEnd : max, reconciled[0].periodEnd)
+        : allDates[allDates.length - 1];
+    }
+
+    let synth = generateFixedExpenseTransactions(fixedExpenses, rangeStart, rangeEnd);
+    if (showYearFilter && selectedYear) {
+      synth = synth.filter((t) => t.transDate.startsWith(selectedYear));
+    }
+    return synth;
+  })();
+
+  const filteredTxns = [...filteredCardTxns, ...fixedTxns];
 
   // Recompute byCategory whenever filters change
   useEffect(() => {
@@ -233,7 +297,7 @@ export function Dashboard({
       .map(([category, { total, count }]) => ({ category, total, count }))
       .sort((a, b) => b.total - a.total);
     setByCategory(cats);
-  }, [allTransactions, cardholder, selectedCard, selectedStatement, selectedYear]);
+  }, [allTransactions, cardholder, selectedCard, selectedStatement, selectedYear, includeFixedExpenses, fixedExpenses, statements]);
 
   const totalSpending = byCategory.reduce((sum, c) => sum + c.total, 0);
 
@@ -456,15 +520,12 @@ export function Dashboard({
   return (
     <div className="dashboard">
       <div className="dashboard-top-bar">
-        <div
-          className={`dashboard-controls${showCardFilter ? '' : ' dashboard-controls--no-card-filter'}`}
-        >
+        <div className="filters dashboard-filters">
           {showCardFilter && (
             <FilterSelect
               value={selectedCard}
               onChange={(value) => {
                 onCardChange(value);
-                // Clear statement selection if it doesn't belong to the new card
                 if (value && selectedStatement) {
                   const stmt = statements.find((s) => s.id === selectedStatement);
                   if (stmt && stmt.cardProfileId !== value) onStatementChange('');
@@ -516,6 +577,17 @@ export function Dashboard({
               ]}
             />
           )}
+          {fixedExpenses.length > 0 && (
+            <label className="fixed-expense-toggle">
+              <input
+                type="checkbox"
+                checked={includeFixedExpenses}
+                onChange={(e) => onIncludeFixedExpensesChange(e.target.checked)}
+              />
+              <span className="fixed-expense-toggle-track" />
+              <span className="fixed-expense-toggle-label">Fixed expenses</span>
+            </label>
+          )}
         </div>
       </div>
 
@@ -553,7 +625,7 @@ export function Dashboard({
         </div>
       ) : (
         <>
-          <div className="stats-summary">
+          <div className={`stats-summary${includeFixedExpenses && fixedExpenses.length > 0 && incomeSources.length > 0 ? ' stats-summary--8' : ''}${blurAmounts ? ' blur-amounts' : ''}`}>
             <SparkCard
               label={selectedStatement ? 'Statement period' : 'Total spending'}
               value={
@@ -592,16 +664,60 @@ export function Dashboard({
               value={groupedForPie.length > 0 ? groupedForPie[0].name : '--'}
               subtitle={groupedForPie.length > 0 ? fmtMoney(groupedForPie[0].total) : undefined}
             />
+            {includeFixedExpenses && fixedExpenses.length > 0 && (() => {
+              const fixedMonthly = monthlyFixedTotal(fixedExpenses);
+              const cardPortion = selectedStatement
+                ? focusIdx >= 0 ? focusTotal : 0
+                : latestTotal;
+              const totalMonthly = cardPortion + fixedMonthly;
+              const totalIncome = incomeSources.reduce((sum, s) => sum + s.amount, 0);
+              const surplus = totalIncome - totalMonthly;
+
+              return (
+                <>
+                  <SparkCard
+                    label="Fixed monthly expenses"
+                    value={fmtMoney(fixedMonthly)}
+                    subtitle={`${fixedExpenses.filter((e) => !e.endDate || e.endDate >= new Date().toISOString().slice(0, 10)).length} recurring`}
+                  />
+                  <SparkCard
+                    label="Total monthly spending"
+                    value={fmtMoney(totalMonthly)}
+                    subtitle="Cards + fixed expenses"
+                  />
+                  {incomeSources.length > 0 && (
+                    <SparkCard
+                      label="Monthly income"
+                      value={fmtMoney(totalIncome)}
+                      subtitle={incomeSources.map((s) => s.person).join(' + ')}
+                    />
+                  )}
+                  {incomeSources.length > 0 && (
+                    <SparkCard
+                      label="Monthly surplus"
+                      value={fmtMoney(Math.abs(surplus))}
+                      valueColor={surplus >= 0 ? 'var(--green)' : 'var(--red)'}
+                      subtitle={surplus >= 0 ? 'Left over after spending' : 'Over budget'}
+                    />
+                  )}
+                </>
+              );
+            })()}
           </div>
 
           <div className="charts-grid">
             {!selectedStatement && showCardFilter && !selectedCard && (() => {
               const cardSpending = cardProfiles.map((p) => {
-                const total = filteredTxns
+                const total = filteredCardTxns
                   .filter((t) => t.cardProfileId === p.id)
                   .reduce((sum, t) => sum + t.amount, 0);
                 return { card: p.cardLabel, amount: Math.round(total * 100) / 100 };
               }).filter((d) => d.amount > 0);
+
+              if (includeFixedExpenses && fixedTxns.length > 0) {
+                const fixedTotal = fixedTxns.reduce((sum, t) => sum + t.amount, 0);
+                cardSpending.push({ card: 'Fixed Expenses', amount: Math.round(fixedTotal * 100) / 100 });
+              }
 
               if (cardSpending.length === 0) return (
                 <div className="chart-card">

@@ -2,8 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, doc, updateDoc, query, where, addDoc, writeBatch, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CATEGORIES } from '../types';
+import type { FixedExpense } from '../types';
 import { extractMerchantPattern } from '../lib/categorize';
 import { PARENT_CATEGORY_NAMES, transactionMatchesCategoryFilter } from '../lib/categoryGroups';
+import { generateFixedExpenseTransactions } from '../lib/fixedExpenses';
+import type { SyntheticTransaction } from '../lib/fixedExpenses';
 import { SparkCard } from './ui/SparkCard';
 import { FilterSelect } from './ui/FilterSelect';
 import { reconcileBillingPeriod } from '../lib/statementPeriod';
@@ -45,7 +48,11 @@ interface Props {
   householdId: string;
   onStevieMood?: (report: StevieMoodReport | null) => void;
   stevieStatHighlight?: 'good' | 'bad' | null;
+  includeFixedExpenses: boolean;
+  onIncludeFixedExpensesChange: (value: boolean) => void;
 }
+
+type DisplayTransaction = (Transaction & { isFixedExpense?: false }) | SyntheticTransaction;
 
 function formatStmtDate(dateStr: string): string {
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -87,6 +94,8 @@ export function TransactionList({
   householdId,
   onStevieMood,
   stevieStatHighlight = null,
+  includeFixedExpenses,
+  onIncludeFixedExpensesChange,
 }: Props) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filter, setFilter] = useState({
@@ -137,10 +146,20 @@ export function TransactionList({
     setCardProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CardProfileInfo)));
   };
 
+  const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
+  const fetchFixedExpenses = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'households', householdId, 'fixedExpenses'));
+      setFixedExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as FixedExpense)));
+    } catch {
+      setFixedExpenses([]);
+    }
+  };
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      await Promise.all([fetchTransactions(), fetchStatements(), fetchCardProfiles()]);
+      await Promise.all([fetchTransactions(), fetchStatements(), fetchCardProfiles(), fetchFixedExpenses()]);
       setLoading(false);
     };
     load();
@@ -156,6 +175,39 @@ export function TransactionList({
 
   const showCardFilter = cardProfiles.length > 1;
 
+  // Generate synthetic fixed expense transactions
+  const fixedTxns = useMemo(() => {
+    if (!includeFixedExpenses || fixedExpenses.length === 0) return [];
+    if (statements.length === 0) return [];
+
+    let rangeStart: string;
+    let rangeEnd: string;
+
+    if (filter.statement) {
+      const stmt = statements.find((s) => s.id === filter.statement);
+      if (!stmt || !stmt.periodStart || !stmt.periodEnd) return [];
+      const r = reconcileBillingPeriod(stmt.periodStart, stmt.periodEnd);
+      rangeStart = r.periodStart;
+      rangeEnd = r.periodEnd;
+    } else {
+      const reconciled = statements
+        .filter((s) => s.periodStart && s.periodEnd)
+        .map((s) => reconcileBillingPeriod(s.periodStart, s.periodEnd));
+      if (reconciled.length === 0) return [];
+      rangeStart = reconciled.reduce((min, r) => r.periodStart < min ? r.periodStart : min, reconciled[0].periodStart);
+      rangeEnd = reconciled.reduce((max, r) => r.periodEnd > max ? r.periodEnd : max, reconciled[0].periodEnd);
+    }
+
+    let synth = generateFixedExpenseTransactions(fixedExpenses, rangeStart, rangeEnd);
+    if (showYearFilter && filter.year) {
+      synth = synth.filter((t) => t.transDate.startsWith(filter.year));
+    }
+    if (filter.category) {
+      synth = synth.filter((t) => transactionMatchesCategoryFilter(t.category, filter.category));
+    }
+    return synth;
+  }, [includeFixedExpenses, fixedExpenses, statements, filter.statement, filter.year, filter.category, showYearFilter]);
+
   // Filter client-side to avoid composite index requirements
   useEffect(() => {
     let filtered = allTransactions;
@@ -170,6 +222,13 @@ export function TransactionList({
     if (showYearFilter && filter.year) filtered = filtered.filter((t) => t.transDate.startsWith(filter.year));
     setTransactions(filtered);
   }, [allTransactions, filter, showYearFilter, showCardFilter]);
+
+  // Merge real + fixed transactions for display
+  const displayTransactions: DisplayTransaction[] = useMemo(() => {
+    const all: DisplayTransaction[] = [...transactions, ...fixedTxns];
+    all.sort((a, b) => b.transDate.localeCompare(a.transDate));
+    return all;
+  }, [transactions, fixedTxns]);
 
   const updateCategory = async (id: string, description: string, newCategory: string) => {
     const pattern = extractMerchantPattern(description);
@@ -390,7 +449,7 @@ export function TransactionList({
             { value: '', label: 'All Categories' },
             ...[
               ...PARENT_CATEGORY_NAMES.map((p) => ({ value: p, label: `${p} (all)` })),
-              ...CATEGORIES.map((c) => ({ value: c, label: c })),
+              ...CATEGORIES.filter((c) => !PARENT_CATEGORY_NAMES.includes(c)).map((c) => ({ value: c, label: c })),
             ].sort((a, b) => a.label.localeCompare(b.label)),
           ]}
         />
@@ -418,6 +477,17 @@ export function TransactionList({
               .map((name) => ({ value: name, label: name.split(' ')[0] || name })),
           ]}
         />
+        {fixedExpenses.length > 0 && (
+          <label className="fixed-expense-toggle">
+            <input
+              type="checkbox"
+              checked={includeFixedExpenses}
+              onChange={(e) => onIncludeFixedExpensesChange(e.target.checked)}
+            />
+            <span className="fixed-expense-toggle-track" />
+            <span className="fixed-expense-toggle-label">Fixed expenses</span>
+          </label>
+        )}
       </div>
       <div className="transactions-toolbar">
         <div className="stats-summary">
@@ -501,18 +571,31 @@ export function TransactionList({
             </tr>
           </thead>
           <tbody>
-            {transactions.map((txn, index) => (
-              <tr key={txn.id} className={txn.isCredit ? 'credit-row' : ''}>
+            {displayTransactions.map((txn, index) => {
+              const isFixed = 'isFixedExpense' in txn && txn.isFixedExpense;
+              return (
+              <tr key={txn.id} className={`${txn.isCredit ? 'credit-row' : ''}${isFixed ? ' fixed-expense-row' : ''}`}>
                 <td className="txn-index-cell">{index + 1}</td>
                 <td className="date-cell">{formatTxnDisplayDate(txn.transDate)}</td>
                 <td className="desc-cell" title={txn.description}>
+                  {isFixed && (
+                    <svg className="fixed-expense-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 2.1l4 4-4 4" /><path d="M3 12.2v-2a4 4 0 0 1 4-4h12.8" />
+                      <path d="M7 21.9l-4-4 4-4" /><path d="M21 11.8v2a4 4 0 0 1-4 4H4.2" />
+                    </svg>
+                  )}
                   {txn.description}
                 </td>
-                <td>{txn.cardholder.split(' ')[0]}</td>
+                <td>{isFixed ? '' : txn.cardholder.split(' ')[0]}</td>
                 <td className={`amount-cell ${txn.isCredit ? 'credit' : 'charge'}`}>
                   {formatTxnAmount(txn.amount, txn.isCredit)}
                 </td>
                 <td>
+                  {isFixed ? (
+                    <span className={`category-badge cat-${txn.category.toLowerCase().replace(/[^a-z]/g, '-')}`}>
+                      {txn.category}
+                    </span>
+                  ) : (
                   <span className="category-cell-wrapper">
                     <span className={`category-badge clickable-badge cat-${txn.category.toLowerCase().replace(/[^a-z]/g, '-')}`}>
                       {txn.category}
@@ -533,9 +616,12 @@ export function TransactionList({
                       ))}
                     </select>
                   </span>
+                  )}
                 </td>
                 <td>
-                  {txn.confirmed ? (
+                  {isFixed ? (
+                    <span className="confirmed-badge">Fixed</span>
+                  ) : txn.confirmed ? (
                     <span className="confirmed-badge">Confirmed</span>
                   ) : (
                     <span
@@ -547,7 +633,8 @@ export function TransactionList({
                   )}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>

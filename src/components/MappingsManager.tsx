@@ -7,7 +7,7 @@ import { parseStatement, extractText } from '../lib/parser';
 import { extractMerchantPattern } from '../lib/categorize';
 import { FilterSelect } from './ui/FilterSelect';
 import { Modal, ModalBodyPanel } from './ui/Modal';
-import type { CardProfile } from '../types';
+import type { CardProfile, FixedExpense, IncomeSource } from '../types';
 import { CATEGORIES } from '../types';
 
 interface Mapping {
@@ -19,6 +19,8 @@ interface Mapping {
 
 interface Props {
   householdId: string;
+  blurAmounts: boolean;
+  onBlurAmountsChange: (value: boolean) => void;
 }
 
 interface GenerateResult {
@@ -35,7 +37,7 @@ interface GenerateResult {
 
 type AddCardStep = 'idle' | 'label' | 'upload' | 'processing' | 'done';
 
-export function MappingsManager({ householdId }: Props) {
+export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange }: Props) {
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [cardProfiles, setCardProfiles] = useState<(CardProfile & { id: string })[]>([]);
   const [addCardStep, setAddCardStep] = useState<AddCardStep>('idle');
@@ -56,8 +58,25 @@ export function MappingsManager({ householdId }: Props) {
   const [editMappingCategory, setEditMappingCategory] = useState('');
   const [editMappingError, setEditMappingError] = useState('');
 
+  const [fixedExpenses, setFixedExpenses] = useState<(FixedExpense & { id: string })[]>([]);
+  const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
+  const [expenseLabel, setExpenseLabel] = useState('');
+  const [expenseAmount, setExpenseAmount] = useState('');
+  const [expenseCategory, setExpenseCategory] = useState('Utilities');
+  const [expenseStartDate, setExpenseStartDate] = useState('');
+  const [expenseEndDate, setExpenseEndDate] = useState('');
+  const [expenseError, setExpenseError] = useState('');
+  const [addingExpense, setAddingExpense] = useState(false);
+
+  const [incomeSources, setIncomeSources] = useState<(IncomeSource & { id: string })[]>([]);
+  const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
+  const [incomePerson, setIncomePerson] = useState('');
+  const [incomeAmount, setIncomeAmount] = useState('');
+  const [incomeError, setIncomeError] = useState('');
+  const [addingIncome, setAddingIncome] = useState(false);
+
   const [deleteTarget, setDeleteTarget] = useState<
-    { kind: 'card'; id: string } | { kind: 'mapping'; id: string } | null
+    { kind: 'card'; id: string } | { kind: 'mapping'; id: string } | { kind: 'expense'; id: string } | { kind: 'income'; id: string } | null
   >(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [expandedMappingGroups, setExpandedMappingGroups] = useState<Set<string>>(new Set());
@@ -87,14 +106,142 @@ export function MappingsManager({ householdId }: Props) {
     setCardProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CardProfile & { id: string })));
   }, [householdId]);
 
+  const fetchFixedExpenses = useCallback(async () => {
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'households', householdId, 'fixedExpenses'), orderBy('label'))
+      );
+      setFixedExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as FixedExpense & { id: string })));
+    } catch {
+      setFixedExpenses([]);
+    }
+  }, [householdId]);
+
+  const fetchIncomeSources = useCallback(async () => {
+    try {
+      const snap = await getDocs(
+        query(collection(db, 'households', householdId, 'incomeSources'), orderBy('person'))
+      );
+      setIncomeSources(snap.docs.map((d) => ({ id: d.id, ...d.data() } as IncomeSource & { id: string })));
+    } catch {
+      setIncomeSources([]);
+    }
+  }, [householdId]);
+
   useEffect(() => {
     fetchMappings();
     fetchCardProfiles();
-  }, [fetchMappings, fetchCardProfiles]);
+    fetchFixedExpenses();
+    fetchIncomeSources();
+  }, [fetchMappings, fetchCardProfiles, fetchFixedExpenses, fetchIncomeSources]);
 
   const deleteMappingDoc = async (id: string) => {
     await deleteDoc(doc(db, 'households', householdId, 'categoryMappings', id));
     fetchMappings();
+  };
+
+  const openAddExpense = () => {
+    setAddingExpense(true);
+    setEditingExpenseId(null);
+    setExpenseLabel('');
+    setExpenseAmount('');
+    setExpenseCategory('Utilities');
+    setExpenseStartDate(new Date().toISOString().slice(0, 10));
+    setExpenseEndDate('');
+    setExpenseError('');
+  };
+
+  const openEditExpense = (e: FixedExpense & { id: string }) => {
+    setAddingExpense(false);
+    setEditingExpenseId(e.id);
+    setExpenseLabel(e.label);
+    setExpenseAmount(String(e.amount));
+    setExpenseCategory(e.category);
+    setExpenseStartDate(e.startDate);
+    setExpenseEndDate(e.endDate || '');
+    setExpenseError('');
+  };
+
+  const closeExpenseModal = () => {
+    setAddingExpense(false);
+    setEditingExpenseId(null);
+    setExpenseError('');
+  };
+
+  const saveExpense = async () => {
+    const label = expenseLabel.trim();
+    if (!label) { setExpenseError('Name is required.'); return; }
+    const amount = parseFloat(expenseAmount);
+    if (!amount || amount <= 0) { setExpenseError('Enter a valid amount.'); return; }
+    if (!expenseStartDate) { setExpenseError('Start date is required.'); return; }
+    setExpenseError('');
+
+    const data: Omit<FixedExpense, 'id'> = {
+      label,
+      amount,
+      category: expenseCategory,
+      frequency: 'monthly',
+      startDate: expenseStartDate,
+      ...(expenseEndDate ? { endDate: expenseEndDate } : {}),
+    };
+
+    try {
+      if (editingExpenseId) {
+        await updateDoc(doc(db, 'households', householdId, 'fixedExpenses', editingExpenseId), data);
+      } else {
+        await addDoc(collection(db, 'households', householdId, 'fixedExpenses'), data);
+      }
+      closeExpenseModal();
+      fetchFixedExpenses();
+    } catch (err) {
+      console.error('Save expense error:', err);
+      setExpenseError(err instanceof Error ? err.message : 'Could not save.');
+    }
+  };
+
+  const openAddIncome = () => {
+    setAddingIncome(true);
+    setEditingIncomeId(null);
+    setIncomePerson('');
+    setIncomeAmount('');
+    setIncomeError('');
+  };
+
+  const openEditIncome = (inc: IncomeSource & { id: string }) => {
+    setAddingIncome(false);
+    setEditingIncomeId(inc.id);
+    setIncomePerson(inc.person);
+    setIncomeAmount(String(inc.amount));
+    setIncomeError('');
+  };
+
+  const closeIncomeModal = () => {
+    setAddingIncome(false);
+    setEditingIncomeId(null);
+    setIncomeError('');
+  };
+
+  const saveIncome = async () => {
+    const person = incomePerson.trim();
+    if (!person) { setIncomeError('Name is required.'); return; }
+    const amount = parseFloat(incomeAmount);
+    if (!amount || amount <= 0) { setIncomeError('Enter a valid amount.'); return; }
+    setIncomeError('');
+
+    const data: Omit<IncomeSource, 'id'> = { person, amount };
+
+    try {
+      if (editingIncomeId) {
+        await updateDoc(doc(db, 'households', householdId, 'incomeSources', editingIncomeId), data);
+      } else {
+        await addDoc(collection(db, 'households', householdId, 'incomeSources'), data);
+      }
+      closeIncomeModal();
+      fetchIncomeSources();
+    } catch (err) {
+      console.error('Save income error:', err);
+      setIncomeError(err instanceof Error ? err.message : 'Could not save.');
+    }
   };
 
   const mappingPatternTaken = (normalized: string, exceptId?: string) =>
@@ -154,6 +301,12 @@ export function MappingsManager({ householdId }: Props) {
     try {
       if (deleteTarget.kind === 'card') {
         await deleteCardDoc(deleteTarget.id);
+      } else if (deleteTarget.kind === 'expense') {
+        await deleteDoc(doc(db, 'households', householdId, 'fixedExpenses', deleteTarget.id));
+        fetchFixedExpenses();
+      } else if (deleteTarget.kind === 'income') {
+        await deleteDoc(doc(db, 'households', householdId, 'incomeSources', deleteTarget.id));
+        fetchIncomeSources();
       } else {
         await deleteMappingDoc(deleteTarget.id);
       }
@@ -173,11 +326,23 @@ export function MappingsManager({ householdId }: Props) {
         ? `The card “${p.cardLabel}” (${p.bankName}) will be removed.`
         : 'This card will be removed.';
     }
+    if (deleteTarget.kind === 'expense') {
+      const e = fixedExpenses.find((x) => x.id === deleteTarget.id);
+      return e
+        ? `The fixed expense “${e.label}” ($${e.amount}/mo) will be removed.`
+        : 'This fixed expense will be removed.';
+    }
+    if (deleteTarget.kind === 'income') {
+      const inc = incomeSources.find((x) => x.id === deleteTarget.id);
+      return inc
+        ? `The income source for “${inc.person}” will be removed.`
+        : 'This income source will be removed.';
+    }
     const m = mappings.find((x) => x.id === deleteTarget.id);
     return m
       ? `The mapping “${m.merchantPattern}” → ${m.category} will be removed.`
       : 'This mapping will be removed.';
-  }, [deleteTarget, cardProfiles, mappings]);
+  }, [deleteTarget, cardProfiles, mappings, fixedExpenses]);
 
   const onDrop = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -412,8 +577,23 @@ export function MappingsManager({ householdId }: Props) {
 
   return (
     <div className="mappings-page">
+      {/* Display Section */}
+      <h2>Display</h2>
+      <div className="settings-display-section">
+        <label className="fixed-expense-toggle">
+          <input
+            type="checkbox"
+            checked={blurAmounts}
+            onChange={(e) => onBlurAmountsChange(e.target.checked)}
+          />
+          <span className="fixed-expense-toggle-track" />
+          <span className="fixed-expense-toggle-label">Blur amounts</span>
+        </label>
+        <span className="hint" style={{ margin: 0 }}>Hide dollar values on the dashboard for privacy</span>
+      </div>
+
       {/* Card Profiles Section */}
-      <h2>Credit Cards</h2>
+      <h2 className="mappings-page-section-title">Credit Cards</h2>
       <p className="hint">
         Card profiles tell the parser how to read each credit card's statement format.
       </p>
@@ -575,6 +755,238 @@ export function MappingsManager({ householdId }: Props) {
               </button>
             </div>
           </>
+        )}
+      </Modal>
+
+      {/* Fixed Expenses Section */}
+      <h2 className="mappings-page-section-title">Fixed Expenses</h2>
+      <p className="hint">
+        Recurring expenses outside of credit cards (rent, utilities, insurance, etc.) that are included in your spending totals.
+      </p>
+
+      <div className="table-wrapper">
+        <table className="transactions-table fixed-expenses-table">
+          <thead>
+            <tr>
+              <th>Expense</th>
+              <th>Amount</th>
+              <th>Category</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {fixedExpenses.map((e) => (
+              <tr key={e.id}>
+                <td className="mapping-cell-primary">
+                  <strong>{e.label}</strong>
+                  {e.endDate && <span className="fixed-expense-ended"> (ended)</span>}
+                </td>
+                <td className="mapping-cell-meta fixed-expense-amount">
+                  ${e.amount.toLocaleString('en-CA', { minimumFractionDigits: 2 })}/mo
+                </td>
+                <td className="mapping-cell-meta2">
+                  <span className={`category-badge cat-${e.category.toLowerCase().replace(/[^a-z]/g, '-')}`}>
+                    {e.category}
+                  </span>
+                </td>
+                <td className="mapping-cell-actions">
+                  <button type="button" className="btn btn-xs" onClick={() => openEditExpense(e)}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-destructive"
+                    onClick={() => setDeleteTarget({ kind: 'expense', id: e.id })}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {fixedExpenses.length === 0 && (
+              <tr>
+                <td colSpan={4} className="empty-state" style={{ padding: '20px 14px', borderBottom: 'none' }}>
+                  No fixed expenses yet.
+                </td>
+              </tr>
+            )}
+            <tr>
+              <td colSpan={4} className="table-action-row">
+                <button type="button" className="btn btn-xs btn-save" onClick={openAddExpense}>
+                  + Add Expense
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <Modal
+        open={addingExpense || editingExpenseId !== null}
+        onClose={closeExpenseModal}
+        title={editingExpenseId ? 'Edit expense' : 'Add fixed expense'}
+        description="This amount will be added to your monthly spending totals."
+      >
+        <ModalBodyPanel>
+          <div className="edit-card-panel-fields">
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">Name</span>
+              <input
+                type="text"
+                className="household-input"
+                placeholder="e.g. Rent, Hydro, Insurance"
+                value={expenseLabel}
+                onChange={(e) => setExpenseLabel(e.target.value)}
+              />
+            </label>
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">Monthly amount</span>
+              <input
+                type="number"
+                className="household-input"
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+                value={expenseAmount}
+                onChange={(e) => setExpenseAmount(e.target.value)}
+              />
+            </label>
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">Category</span>
+              <FilterSelect
+                className="filter-pill mapping-category-select"
+                value={expenseCategory}
+                onChange={setExpenseCategory}
+                options={categorySelectOptions}
+              />
+            </label>
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">Start date</span>
+              <input
+                type="date"
+                className="household-input"
+                value={expenseStartDate}
+                onChange={(e) => setExpenseStartDate(e.target.value)}
+              />
+            </label>
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">End date <span className="edit-card-field-hint">(optional — leave blank if ongoing)</span></span>
+              <input
+                type="date"
+                className="household-input"
+                value={expenseEndDate}
+                onChange={(e) => setExpenseEndDate(e.target.value)}
+              />
+            </label>
+          </div>
+        </ModalBodyPanel>
+        <div className="edit-card-panel-actions">
+          <button type="button" className="btn" onClick={closeExpenseModal}>Cancel</button>
+          <button type="button" className="btn btn-save" onClick={() => void saveExpense()}>
+            {editingExpenseId ? 'Save changes' : 'Add expense'}
+          </button>
+        </div>
+        {expenseError && (
+          <p className="login-error household-inline-error edit-card-panel-error">{expenseError}</p>
+        )}
+      </Modal>
+
+      {/* Income Section */}
+      <h2 className="mappings-page-section-title">Income</h2>
+      <p className="hint">
+        Monthly income per person. Used to calculate your household surplus on the dashboard.
+      </p>
+
+      <div className="table-wrapper">
+        <table className="transactions-table fixed-expenses-table">
+          <thead>
+            <tr>
+              <th>Person</th>
+              <th>Monthly Income</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {incomeSources.map((inc) => (
+              <tr key={inc.id}>
+                <td className="mapping-cell-primary">
+                  <strong>{inc.person}</strong>
+                </td>
+                <td className="mapping-cell-meta fixed-expense-amount">
+                  ${inc.amount.toLocaleString('en-CA', { minimumFractionDigits: 2 })}/mo
+                </td>
+                <td className="mapping-cell-actions">
+                  <button type="button" className="btn btn-xs" onClick={() => openEditIncome(inc)}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-destructive"
+                    onClick={() => setDeleteTarget({ kind: 'income', id: inc.id })}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {incomeSources.length === 0 && (
+              <tr>
+                <td colSpan={3} className="empty-state" style={{ padding: '20px 14px', borderBottom: 'none' }}>
+                  No income sources yet.
+                </td>
+              </tr>
+            )}
+            <tr>
+              <td colSpan={3} className="table-action-row">
+                <button type="button" className="btn btn-xs btn-save" onClick={openAddIncome}>
+                  + Add Income
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <Modal
+        open={addingIncome || editingIncomeId !== null}
+        onClose={closeIncomeModal}
+        title={editingIncomeId ? 'Edit income' : 'Add income source'}
+        description="Monthly take-home income for this person."
+      >
+        <ModalBodyPanel>
+          <div className="edit-card-panel-fields">
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">Person</span>
+              <input
+                type="text"
+                className="household-input"
+                placeholder="e.g. Max, Kathryn"
+                value={incomePerson}
+                onChange={(e) => setIncomePerson(e.target.value)}
+              />
+            </label>
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">Monthly amount</span>
+              <input
+                type="number"
+                className="household-input"
+                placeholder="0.00"
+                min="0"
+                step="0.01"
+                value={incomeAmount}
+                onChange={(e) => setIncomeAmount(e.target.value)}
+              />
+            </label>
+          </div>
+        </ModalBodyPanel>
+        <div className="edit-card-panel-actions">
+          <button type="button" className="btn" onClick={closeIncomeModal}>Cancel</button>
+          <button type="button" className="btn btn-save" onClick={() => void saveIncome()}>
+            {editingIncomeId ? 'Save changes' : 'Add income'}
+          </button>
+        </div>
+        {incomeError && (
+          <p className="login-error household-inline-error edit-card-panel-error">{incomeError}</p>
         )}
       </Modal>
 
