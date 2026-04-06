@@ -37,13 +37,20 @@ function App() {
   const [selectedYear, setSelectedYear] = useState('');
   const [cardholder, setCardholder] = useState('');
   const [selectedCard, setSelectedCard] = useState('');
-  const [includeFixedExpenses, setIncludeFixedExpenses] = useState(true);
   const [blurAmounts, setBlurAmounts] = useState(() => localStorage.getItem('blurAmounts') === 'true');
+  const [statementMonthOffset, setStatementMonthOffset] = useState(() => {
+    const saved = localStorage.getItem('statementMonthOffset');
+    return saved ? parseInt(saved, 10) : 0;
+  });
   const { theme, setTheme } = useTheme();
 
   const toggleBlurAmounts = (v: boolean) => {
     setBlurAmounts(v);
     localStorage.setItem('blurAmounts', String(v));
+  };
+  const handleStatementMonthOffsetChange = (v: number) => {
+    setStatementMonthOffset(v);
+    localStorage.setItem('statementMonthOffset', String(v));
   };
   const authUidRef = useRef<string | null>(null);
   const [showMappingOnboarding, setShowMappingOnboarding] = useState(false);
@@ -344,7 +351,7 @@ function App() {
           </div>
         </div>
       </header>
-      <main className="app-main">
+      <main className={`app-main${blurAmounts ? ' blur-amounts' : ''}`}>
         {activeTab === 'dashboard' && (
           <Dashboard
             key={refreshKey}
@@ -361,9 +368,7 @@ function App() {
             onCardChange={setSelectedCard}
             onStevieMood={setStevieMood}
             stevieStatHighlight={stevieStatHighlight}
-            includeFixedExpenses={includeFixedExpenses}
-            onIncludeFixedExpensesChange={setIncludeFixedExpenses}
-            blurAmounts={blurAmounts}
+            statementMonthOffset={statementMonthOffset}
           />
         )}
         {activeTab === 'transactions' && (
@@ -380,8 +385,7 @@ function App() {
             householdId={householdId}
             onStevieMood={setStevieMood}
             stevieStatHighlight={stevieStatHighlight}
-            includeFixedExpenses={includeFixedExpenses}
-            onIncludeFixedExpensesChange={setIncludeFixedExpenses}
+            statementMonthOffset={statementMonthOffset}
           />
         )}
         {activeTab === 'upload' && (
@@ -403,6 +407,8 @@ function App() {
             householdId={householdId}
             blurAmounts={blurAmounts}
             onBlurAmountsChange={toggleBlurAmounts}
+            statementMonthOffset={statementMonthOffset}
+            onStatementMonthOffsetChange={handleStatementMonthOffsetChange}
           />
         )}
       </main>

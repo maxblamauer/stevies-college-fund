@@ -8,7 +8,8 @@ import { SparkCard } from './ui/SparkCard';
 import { FilterSelect } from './ui/FilterSelect';
 import { billingPeriodInclusiveDays, reconcileBillingPeriod } from '../lib/statementPeriod';
 import { CHILD_TO_PARENT } from '../lib/categoryGroups';
-import { generateFixedExpenseTransactions, monthlyFixedTotal } from '../lib/fixedExpenses';
+import { monthlyFixedTotal } from '../lib/fixedExpenses';
+import { offsetStatementLabel, offsetStatementAxisLabel, offsetStatementFullLabel, offsetStatementDropdownLabel } from '../lib/statementMonthOffset';
 import type { FixedExpense, IncomeSource } from '../types';
 import type { StevieMoodReport } from '../lib/stevieMood';
 
@@ -125,33 +126,13 @@ interface Props {
   onCardChange: (card: string) => void;
   onStevieMood?: (report: StevieMoodReport | null) => void;
   stevieStatHighlight?: 'good' | 'bad' | null;
-  includeFixedExpenses: boolean;
-  onIncludeFixedExpensesChange: (value: boolean) => void;
-  blurAmounts: boolean;
+  statementMonthOffset: number;
 }
 
 function fmtMoney(n: number): string {
   return n.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' });
 }
 
-const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
-
-function formatStmtDate(dateStr: string): string {
-  const [, m, d] = dateStr.split('-');
-  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} ${d}`;
-}
-
-/** Full date for chart tooltips (unique per statement; avoids duplicate x-axis collisions). */
-function formatStmtDateFull(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-');
-  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} ${parseInt(d, 10)}, ${y}`;
-}
-
-/** Compact labels for the trend x-axis when space is tight. */
-function formatStmtDateAxis(dateStr: string): string {
-  const [y, m, d] = dateStr.split('-');
-  return `${MONTHS_SHORT[parseInt(m, 10) - 1]} ${parseInt(d, 10)} '${y.slice(-2)}`;
-}
 
 /** Largest N category groups get their own slice; the rest merge into one “smaller categories” wedge (rank-based so several ~1–2% categories still appear). */
 const PIE_MAX_INDIVIDUAL_SLICES = 9;
@@ -170,9 +151,7 @@ export function Dashboard({
   onCardChange,
   onStevieMood,
   stevieStatHighlight = null,
-  includeFixedExpenses,
-  onIncludeFixedExpensesChange,
-  blurAmounts,
+  statementMonthOffset,
 }: Props) {
   const [byCategory, setByCategory] = useState<CategoryStat[]>([]);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
@@ -246,48 +225,10 @@ export function Dashboard({
     return true;
   });
 
-  // Generate synthetic fixed expense transactions if toggle is on
-  const fixedTxns = (() => {
-    if (!includeFixedExpenses || fixedExpenses.length === 0) return [];
-    if (statements.length === 0) return [];
-
-    let rangeStart: string;
-    let rangeEnd: string;
-
-    if (selectedStatement) {
-      // Scope to the selected statement's billing period
-      const stmt = statements.find((s) => s.id === selectedStatement);
-      if (!stmt || !stmt.periodStart || !stmt.periodEnd) return [];
-      const r = reconcileBillingPeriod(stmt.periodStart, stmt.periodEnd);
-      rangeStart = r.periodStart;
-      rangeEnd = r.periodEnd;
-    } else {
-      // Use full range across all statements
-      const allDates = statements.map((s) => s.statementDate).sort();
-      const reconciled = statements
-        .filter((s) => s.periodStart && s.periodEnd)
-        .map((s) => reconcileBillingPeriod(s.periodStart, s.periodEnd));
-      rangeStart = reconciled.length > 0
-        ? reconciled.reduce((min, r) => r.periodStart < min ? r.periodStart : min, reconciled[0].periodStart)
-        : allDates[0];
-      rangeEnd = reconciled.length > 0
-        ? reconciled.reduce((max, r) => r.periodEnd > max ? r.periodEnd : max, reconciled[0].periodEnd)
-        : allDates[allDates.length - 1];
-    }
-
-    let synth = generateFixedExpenseTransactions(fixedExpenses, rangeStart, rangeEnd);
-    if (showYearFilter && selectedYear) {
-      synth = synth.filter((t) => t.transDate.startsWith(selectedYear));
-    }
-    return synth;
-  })();
-
-  const filteredTxns = [...filteredCardTxns, ...fixedTxns];
-
-  // Recompute byCategory whenever filters change
+  // Recompute byCategory whenever filters change (card charges only, no synthetic fixed expenses)
   useEffect(() => {
     const catMap = new Map<string, { total: number; count: number }>();
-    for (const t of filteredTxns) {
+    for (const t of filteredCardTxns) {
       const existing = catMap.get(t.category) || { total: 0, count: 0 };
       existing.total += t.amount;
       existing.count++;
@@ -297,7 +238,7 @@ export function Dashboard({
       .map(([category, { total, count }]) => ({ category, total, count }))
       .sort((a, b) => b.total - a.total);
     setByCategory(cats);
-  }, [allTransactions, cardholder, selectedCard, selectedStatement, selectedYear, includeFixedExpenses, fixedExpenses, statements]);
+  }, [allTransactions, cardholder, selectedCard, selectedStatement, selectedYear]);
 
   const totalSpending = byCategory.reduce((sum, c) => sum + c.total, 0);
 
@@ -350,7 +291,7 @@ export function Dashboard({
       .reduce((sum, t) => sum + t.amount, 0);
     return {
       id: s.id,
-      label: formatStmtDate(s.statementDate),
+      label: offsetStatementLabel(s.statementDate, statementMonthOffset),
       statementDate: s.statementDate,
       total: Math.round(total * 100) / 100,
     };
@@ -419,7 +360,7 @@ export function Dashboard({
 
   const dailySpending = selectedStatement
     ? Object.values(
-        filteredTxns
+        filteredCardTxns
           .filter((t) => t.statementId === selectedStatement)
           .reduce<Record<string, { transDate: string; total: number; count: number }>>((acc, t) => {
             if (!acc[t.transDate]) acc[t.transDate] = { transDate: t.transDate, total: 0, count: 0 };
@@ -552,7 +493,7 @@ export function Dashboard({
                   const cardSuffix = card ? ` · ${card.cardLabel}` : '';
                   return {
                     value: s.id,
-                    label: `${formatStmtDate(s.statementDate)} (${r.periodStart} to ${r.periodEnd})${cardSuffix}`,
+                    label: `${offsetStatementDropdownLabel(s.statementDate, r.periodStart, r.periodEnd, statementMonthOffset)}${cardSuffix}`,
                   };
                 }),
             ]}
@@ -576,17 +517,6 @@ export function Dashboard({
                 ...availableYears.map((y) => ({ value: y, label: y })),
               ]}
             />
-          )}
-          {fixedExpenses.length > 0 && (
-            <label className="fixed-expense-toggle">
-              <input
-                type="checkbox"
-                checked={includeFixedExpenses}
-                onChange={(e) => onIncludeFixedExpensesChange(e.target.checked)}
-              />
-              <span className="fixed-expense-toggle-track" />
-              <span className="fixed-expense-toggle-label">Fixed expenses</span>
-            </label>
           )}
         </div>
       </div>
@@ -625,7 +555,7 @@ export function Dashboard({
         </div>
       ) : (
         <>
-          <div className={`stats-summary${includeFixedExpenses && fixedExpenses.length > 0 && incomeSources.length > 0 ? ' stats-summary--8' : ''}${blurAmounts ? ' blur-amounts' : ''}`}>
+          <div className={`stats-summary${selectedStatement && fixedExpenses.length > 0 && incomeSources.length > 0 ? ' stats-summary--8' : ''}`}>
             <SparkCard
               label={selectedStatement ? 'Statement period' : 'Total spending'}
               value={
@@ -664,7 +594,7 @@ export function Dashboard({
               value={groupedForPie.length > 0 ? groupedForPie[0].name : '--'}
               subtitle={groupedForPie.length > 0 ? fmtMoney(groupedForPie[0].total) : undefined}
             />
-            {includeFixedExpenses && fixedExpenses.length > 0 && (() => {
+            {selectedStatement && fixedExpenses.length > 0 && (() => {
               const fixedMonthly = monthlyFixedTotal(fixedExpenses);
               const cardPortion = selectedStatement
                 ? focusIdx >= 0 ? focusTotal : 0
@@ -713,11 +643,6 @@ export function Dashboard({
                   .reduce((sum, t) => sum + t.amount, 0);
                 return { card: p.cardLabel, amount: Math.round(total * 100) / 100 };
               }).filter((d) => d.amount > 0);
-
-              if (includeFixedExpenses && fixedTxns.length > 0) {
-                const fixedTotal = fixedTxns.reduce((sum, t) => sum + t.amount, 0);
-                cardSpending.push({ card: 'Fixed Expenses', amount: Math.round(fixedTotal * 100) / 100 });
-              }
 
               if (cardSpending.length === 0) return (
                 <div className="chart-card">
@@ -801,7 +726,7 @@ export function Dashboard({
                       tickPadding: 14,
                       tickRotation: -32,
                       tickValues: trendChartTickDates,
-                      format: (v) => formatStmtDateAxis(String(v)),
+                      format: (v) => offsetStatementAxisLabel(String(v), statementMonthOffset),
                     }}
                     gridYValues={5}
                     enableGridX={false}
@@ -826,7 +751,7 @@ export function Dashboard({
                       const iso = typeof xRaw === 'string' ? xRaw : String(xRaw);
                       return (
                         <div className="nivo-tip">
-                          {formatStmtDateFull(iso)}: <strong>{fmtMoney(Number(slice.points[0].data.y))}</strong>
+                          {offsetStatementFullLabel(iso, statementMonthOffset)}: <strong>{fmtMoney(Number(slice.points[0].data.y))}</strong>
                         </div>
                       );
                     }}

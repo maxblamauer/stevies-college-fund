@@ -438,6 +438,10 @@ body {
   margin: 0 auto;
 }
 
+.upload-page h2 {
+  margin-bottom: 16px;
+}
+
 .upload-hint {
   color: var(--text-muted);
   margin-bottom: 24px;
@@ -968,7 +972,7 @@ tr:hover {
 }
 
 .dashboard-filters {
-  justify-content: flex-start;
+  justify-content: flex-end;
   width: 100%;
 }
 
@@ -1051,19 +1055,22 @@ tr:hover {
 
 .stats-summary {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   margin-bottom: 24px;
   min-width: 0;
 }
 
-/* 8 cards = force 4+4 */
+/* 8 cards = 4+4 on desktop */
 .stats-summary--8 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 @media (max-width: 960px) and (min-width: 641px) {
   .stats-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .stats-summary--8 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1528,6 +1535,79 @@ tr:hover {
   /* Tables: card-style on mobile */
   .table-wrapper {
     border: none;
+    overflow: visible;
+  }
+
+  .mappings-page {
+    overflow-x: hidden;
+  }
+
+  .mappings-page .table-wrapper {
+    max-width: 100%;
+  }
+
+  .mappings-page .transactions-table {
+    display: block;
+    width: 100%;
+    table-layout: auto;
+  }
+
+  .mappings-page .transactions-table thead {
+    display: none;
+  }
+
+  .mappings-page .transactions-table tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    width: 100%;
+  }
+
+  .mappings-page .transactions-table tbody tr {
+    display: flex;
+    flex-direction: column;
+    padding: 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    box-sizing: border-box;
+    width: 100%;
+  }
+
+  .mappings-page .transactions-table tbody tr:has(.table-action-row) {
+    border: none;
+    padding: 8px 0;
+    background: transparent;
+  }
+
+  .mappings-page .transactions-table tbody td {
+    display: block;
+    padding: 0;
+    border: none;
+    text-align: left;
+  }
+
+  .mappings-page .transactions-table tbody td.mapping-cell-primary {
+    font-size: 14px;
+    font-weight: 600;
+    width: auto;
+  }
+
+  .mappings-page .transactions-table tbody td.mapping-cell-meta,
+  .mappings-page .transactions-table tbody td.mapping-cell-meta2 {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-top: 2px;
+    width: auto;
+  }
+
+  .mappings-page .transactions-table tbody td.mapping-cell-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+    margin-top: 8px;
+    width: auto;
+    text-align: right;
   }
 
   .transactions-table thead {
@@ -1675,10 +1755,11 @@ tr:hover {
   /* Upload action row spans full width */
   .statements-table td.table-action-row {
     grid-column: 1 / -1;
+    text-align: right;
+    justify-self: stretch;
   }
 
   /* Mappings tables — card rows like Transactions index */
-  .transactions-table.mappings-cards-table tbody tr,
   .transactions-table.mappings-rules-table tbody tr {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -1690,7 +1771,6 @@ tr:hover {
     background: var(--bg-card);
   }
 
-  .transactions-table.mappings-cards-table tbody tr:has(.table-action-row),
   .transactions-table.mappings-rules-table tbody tr:has(.table-action-row) {
     border: none;
     padding: 8px 0;
@@ -1698,48 +1778,13 @@ tr:hover {
     background: transparent;
   }
 
-  .transactions-table.mappings-cards-table tbody tr:hover,
   .transactions-table.mappings-rules-table tbody tr:hover {
     background: var(--bg-card);
   }
 
-  .transactions-table.mappings-cards-table tbody td,
   .transactions-table.mappings-rules-table tbody td {
     padding: 0;
     border: none;
-  }
-
-  .transactions-table.mappings-cards-table .mapping-cell-primary {
-    grid-column: 1 / -1;
-    grid-row: 1;
-    font-size: 14px;
-    line-height: 1.35;
-  }
-
-  .transactions-table.mappings-cards-table .mapping-cell-meta {
-    grid-column: 1;
-    grid-row: 2;
-    font-size: 13px;
-  }
-
-  .transactions-table.mappings-cards-table .mapping-cell-meta2 {
-    grid-column: 2;
-    grid-row: 2;
-    justify-self: end;
-    text-align: right;
-    font-size: 13px;
-  }
-
-  .transactions-table.mappings-cards-table .mapping-cell-actions {
-    grid-column: 1 / -1;
-    grid-row: 3;
-    justify-self: end;
-    padding-top: 4px;
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: flex-end;
-    white-space: normal;
   }
 
   .transactions-table.mappings-rules-table .mapping-pattern-cell {
@@ -1776,69 +1821,6 @@ tr:hover {
 
   .transactions-table.mappings-cards-table .mapping-cell-actions .btn + .btn,
   .transactions-table.mappings-rules-table .mapping-cell-actions .btn + .btn {
-    margin-left: 0;
-  }
-
-  /* Fixed Expenses table — card layout */
-  .transactions-table.fixed-expenses-table tbody tr {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 4px 12px;
-    padding: 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    margin-bottom: 6px;
-    background: var(--bg-card);
-  }
-
-  .transactions-table.fixed-expenses-table tbody tr:hover {
-    background: var(--bg-card);
-  }
-
-  .transactions-table.fixed-expenses-table tbody tr:has(.table-action-row),
-  .transactions-table.fixed-expenses-table tbody tr:has(.empty-state) {
-    border: none;
-    padding: 8px 0;
-    margin-bottom: 0;
-    background: transparent;
-  }
-
-  .transactions-table.fixed-expenses-table tbody td {
-    padding: 0;
-    border: none;
-  }
-
-  .transactions-table.fixed-expenses-table .mapping-cell-primary {
-    grid-column: 1;
-    grid-row: 1;
-    font-size: 14px;
-  }
-
-  .transactions-table.fixed-expenses-table .fixed-expense-amount {
-    grid-column: 2;
-    grid-row: 1;
-    justify-self: end;
-    font-weight: 600;
-    font-size: 14px;
-  }
-
-  .transactions-table.fixed-expenses-table .mapping-cell-meta2 {
-    grid-column: 1;
-    grid-row: 2;
-    font-size: 13px;
-  }
-
-  .transactions-table.fixed-expenses-table .mapping-cell-actions {
-    grid-column: 2;
-    grid-row: 2;
-    justify-self: end;
-    align-self: end;
-    display: flex;
-    gap: 6px;
-    white-space: normal;
-  }
-
-  .transactions-table.fixed-expenses-table .mapping-cell-actions .btn + .btn {
     margin-left: 0;
   }
 
@@ -2452,6 +2434,10 @@ tr:hover {
 }
 
 /* ===== MAPPINGS ===== */
+.mappings-page {
+  padding-bottom: 64px;
+}
+
 .mappings-page h2 {
   margin-bottom: 8px;
 }
@@ -2476,6 +2462,52 @@ tr:hover {
 
 .settings-display-section .fixed-expense-toggle {
   margin-left: 0;
+}
+
+.settings-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.settings-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  gap: 16px;
+}
+
+.settings-card-row + .settings-card-row {
+  border-top: 1px solid var(--border);
+}
+
+.settings-card-row-info {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settings-card-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.settings-card-row-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+
+@media (max-width: 640px) {
+  .settings-card-row {
+    padding: 14px 16px;
+    flex-wrap: wrap;
+  }
 }
 
 .fixed-expense-ended {
@@ -2547,6 +2579,7 @@ tr:hover {
   }
 }
 
+/* Blur amounts: stat cards */
 .blur-amounts .spark-card-value,
 .blur-amounts .spark-card-change-pct,
 .blur-amounts .spark-card-subtitle {
@@ -2554,6 +2587,66 @@ tr:hover {
   user-select: none;
   pointer-events: none;
   transition: filter 0.2s;
+}
+
+/* Blur amounts: transaction table */
+.blur-amounts .amount-cell {
+  filter: blur(8px);
+  user-select: none;
+}
+
+/* Income amounts — always blurred for privacy, hover to reveal */
+.income-amount {
+  filter: blur(8px);
+  user-select: none;
+  transition: filter 0.15s;
+}
+
+.income-amount:hover {
+  filter: none;
+}
+
+/* Fixed expense amounts — only blurred when blur setting is on */
+.blur-amounts .fixed-expense-amount {
+  filter: blur(8px);
+  user-select: none;
+}
+
+/* Blur amounts: statement balances on upload page */
+.blur-amounts .stmt-cell-balance {
+  filter: blur(8px);
+  user-select: none;
+}
+
+/* Blur amounts: category breakdown */
+.blur-amounts .category-bar-amount,
+.blur-amounts .category-bar-pct,
+.blur-amounts .category-bar-count {
+  filter: blur(8px);
+  user-select: none;
+}
+
+/* Blur amounts: chart tooltips */
+.blur-amounts .nivo-tip {
+  filter: blur(8px);
+  user-select: none;
+  pointer-events: none;
+}
+
+/* Blur amounts: chart y-axis dollar labels */
+.blur-amounts .chart-card svg text {
+  filter: blur(4px);
+}
+
+/* Blur amounts: pie chart arc labels */
+.blur-amounts .pie-chart-wrap svg text {
+  filter: blur(4px);
+}
+
+/* Blur amounts: pie legend */
+.blur-amounts .pie-legend-item span {
+  filter: blur(6px);
+  user-select: none;
 }
 
 .fixed-expense-icon {
@@ -2568,11 +2661,39 @@ tr:hover {
   opacity: 0.8;
 }
 
+/* Consistent column widths across settings tables */
+.transactions-table.mappings-cards-table,
+.transactions-table.fixed-expenses-table {
+  table-layout: fixed;
+}
+
+.transactions-table.mappings-cards-table .mapping-cell-primary,
+.transactions-table.fixed-expenses-table .mapping-cell-primary {
+  width: 28%;
+}
+
+.transactions-table.mappings-cards-table .mapping-cell-meta,
+.transactions-table.fixed-expenses-table .mapping-cell-meta {
+  width: 22%;
+}
+
+.transactions-table.mappings-cards-table .mapping-cell-meta2,
+.transactions-table.fixed-expenses-table .mapping-cell-meta2 {
+  width: 30%;
+}
+
+.transactions-table.mappings-cards-table .mapping-cell-actions,
+.transactions-table.fixed-expenses-table .mapping-cell-actions {
+  width: 20%;
+}
+
+
 /* Same index table chrome as Transactions (`table-wrapper` + `transactions-table`) */
 .transactions-table.mappings-cards-table .mapping-cell-meta,
 .transactions-table.mappings-cards-table .mapping-cell-meta2,
 .transactions-table.fixed-expenses-table .mapping-cell-meta,
-.transactions-table.fixed-expenses-table .mapping-cell-meta2 {
+.transactions-table.fixed-expenses-table .mapping-cell-meta2,
+.transactions-table.mappings-income-table .mapping-cell-meta {
   color: var(--text-muted);
 }
 
@@ -2600,14 +2721,17 @@ tr:hover {
 .transactions-table.mappings-rules-table th:last-child,
 .transactions-table.mappings-rules-table td:last-child,
 .transactions-table.fixed-expenses-table th:last-child,
-.transactions-table.fixed-expenses-table td:last-child {
+.transactions-table.fixed-expenses-table td:last-child,
+.transactions-table.mappings-income-table th:last-child,
+.transactions-table.mappings-income-table td:last-child {
   text-align: right;
   vertical-align: middle;
 }
 
 .transactions-table.mappings-cards-table .mapping-cell-actions,
 .transactions-table.mappings-rules-table .mapping-cell-actions,
-.transactions-table.fixed-expenses-table .mapping-cell-actions {
+.transactions-table.fixed-expenses-table .mapping-cell-actions,
+.transactions-table.mappings-income-table .mapping-cell-actions {
   text-align: right;
   white-space: nowrap;
   vertical-align: middle;
@@ -2615,7 +2739,8 @@ tr:hover {
 
 .transactions-table.mappings-cards-table .mapping-cell-actions .btn + .btn,
 .transactions-table.mappings-rules-table .mapping-cell-actions .btn + .btn,
-.transactions-table.fixed-expenses-table .mapping-cell-actions .btn + .btn {
+.transactions-table.fixed-expenses-table .mapping-cell-actions .btn + .btn,
+.transactions-table.mappings-income-table .mapping-cell-actions .btn + .btn {
   margin-left: 6px;
 }
 

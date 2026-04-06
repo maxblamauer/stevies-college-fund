@@ -2,14 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, doc, updateDoc, query, where, addDoc, writeBatch, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CATEGORIES } from '../types';
-import type { FixedExpense } from '../types';
+import type { FixedExpense, IncomeSource } from '../types';
 import { extractMerchantPattern } from '../lib/categorize';
+import { monthlyFixedTotal } from '../lib/fixedExpenses';
 import { PARENT_CATEGORY_NAMES, transactionMatchesCategoryFilter } from '../lib/categoryGroups';
-import { generateFixedExpenseTransactions } from '../lib/fixedExpenses';
-import type { SyntheticTransaction } from '../lib/fixedExpenses';
 import { SparkCard } from './ui/SparkCard';
 import { FilterSelect } from './ui/FilterSelect';
 import { reconcileBillingPeriod } from '../lib/statementPeriod';
+import { offsetStatementDropdownLabel } from '../lib/statementMonthOffset';
 import type { StevieMoodReport } from '../lib/stevieMood';
 
 interface Transaction {
@@ -48,16 +48,7 @@ interface Props {
   householdId: string;
   onStevieMood?: (report: StevieMoodReport | null) => void;
   stevieStatHighlight?: 'good' | 'bad' | null;
-  includeFixedExpenses: boolean;
-  onIncludeFixedExpensesChange: (value: boolean) => void;
-}
-
-type DisplayTransaction = (Transaction & { isFixedExpense?: false }) | SyntheticTransaction;
-
-function formatStmtDate(dateStr: string): string {
-  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-  const [, m, d] = dateStr.split('-');
-  return `${months[parseInt(m) - 1]} ${d}`;
+  statementMonthOffset: number;
 }
 
 /** YYYY-MM-DD → "Mar 3, 2026" for table / mobile cards */
@@ -70,6 +61,10 @@ function formatTxnDisplayDate(isoDate: string): string {
   if (!y || !mo || !d) return isoDate;
   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   return `${months[mo - 1]} ${d}, ${y}`;
+}
+
+function fmtMoney(n: number): string {
+  return n.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' });
 }
 
 function formatTxnAmount(amount: number, isCredit: boolean): string {
@@ -94,8 +89,7 @@ export function TransactionList({
   householdId,
   onStevieMood,
   stevieStatHighlight = null,
-  includeFixedExpenses,
-  onIncludeFixedExpensesChange,
+  statementMonthOffset,
 }: Props) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [filter, setFilter] = useState({
@@ -156,10 +150,20 @@ export function TransactionList({
     }
   };
 
+  const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([]);
+  const fetchIncomeSources = async () => {
+    try {
+      const snap = await getDocs(collection(db, 'households', householdId, 'incomeSources'));
+      setIncomeSources(snap.docs.map((d) => ({ id: d.id, ...d.data() } as IncomeSource)));
+    } catch {
+      setIncomeSources([]);
+    }
+  };
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      await Promise.all([fetchTransactions(), fetchStatements(), fetchCardProfiles(), fetchFixedExpenses()]);
+      await Promise.all([fetchTransactions(), fetchStatements(), fetchCardProfiles(), fetchFixedExpenses(), fetchIncomeSources()]);
       setLoading(false);
     };
     load();
@@ -175,39 +179,6 @@ export function TransactionList({
 
   const showCardFilter = cardProfiles.length > 1;
 
-  // Generate synthetic fixed expense transactions
-  const fixedTxns = useMemo(() => {
-    if (!includeFixedExpenses || fixedExpenses.length === 0) return [];
-    if (statements.length === 0) return [];
-
-    let rangeStart: string;
-    let rangeEnd: string;
-
-    if (filter.statement) {
-      const stmt = statements.find((s) => s.id === filter.statement);
-      if (!stmt || !stmt.periodStart || !stmt.periodEnd) return [];
-      const r = reconcileBillingPeriod(stmt.periodStart, stmt.periodEnd);
-      rangeStart = r.periodStart;
-      rangeEnd = r.periodEnd;
-    } else {
-      const reconciled = statements
-        .filter((s) => s.periodStart && s.periodEnd)
-        .map((s) => reconcileBillingPeriod(s.periodStart, s.periodEnd));
-      if (reconciled.length === 0) return [];
-      rangeStart = reconciled.reduce((min, r) => r.periodStart < min ? r.periodStart : min, reconciled[0].periodStart);
-      rangeEnd = reconciled.reduce((max, r) => r.periodEnd > max ? r.periodEnd : max, reconciled[0].periodEnd);
-    }
-
-    let synth = generateFixedExpenseTransactions(fixedExpenses, rangeStart, rangeEnd);
-    if (showYearFilter && filter.year) {
-      synth = synth.filter((t) => t.transDate.startsWith(filter.year));
-    }
-    if (filter.category) {
-      synth = synth.filter((t) => transactionMatchesCategoryFilter(t.category, filter.category));
-    }
-    return synth;
-  }, [includeFixedExpenses, fixedExpenses, statements, filter.statement, filter.year, filter.category, showYearFilter]);
-
   // Filter client-side to avoid composite index requirements
   useEffect(() => {
     let filtered = allTransactions;
@@ -222,13 +193,6 @@ export function TransactionList({
     if (showYearFilter && filter.year) filtered = filtered.filter((t) => t.transDate.startsWith(filter.year));
     setTransactions(filtered);
   }, [allTransactions, filter, showYearFilter, showCardFilter]);
-
-  // Merge real + fixed transactions for display
-  const displayTransactions: DisplayTransaction[] = useMemo(() => {
-    const all: DisplayTransaction[] = [...transactions, ...fixedTxns];
-    all.sort((a, b) => b.transDate.localeCompare(a.transDate));
-    return all;
-  }, [transactions, fixedTxns]);
 
   const updateCategory = async (id: string, description: string, newCategory: string) => {
     const pattern = extractMerchantPattern(description);
@@ -437,7 +401,7 @@ export function TransactionList({
                 const cardSuffix = card ? ` · ${card.cardLabel}` : '';
                 return {
                   value: s.id,
-                  label: `${formatStmtDate(s.statementDate)} (${r.periodStart} to ${r.periodEnd})${cardSuffix}`,
+                  label: `${offsetStatementDropdownLabel(s.statementDate, r.periodStart, r.periodEnd, statementMonthOffset)}${cardSuffix}`,
                 };
               }),
           ]}
@@ -477,50 +441,73 @@ export function TransactionList({
               .map((name) => ({ value: name, label: name.split(' ')[0] || name })),
           ]}
         />
-        {fixedExpenses.length > 0 && (
-          <label className="fixed-expense-toggle">
-            <input
-              type="checkbox"
-              checked={includeFixedExpenses}
-              onChange={(e) => onIncludeFixedExpensesChange(e.target.checked)}
-            />
-            <span className="fixed-expense-toggle-track" />
-            <span className="fixed-expense-toggle-label">Fixed expenses</span>
-          </label>
-        )}
       </div>
       <div className="transactions-toolbar">
-        <div className="stats-summary">
-          <SparkCard
-            label={primaryLabel}
-            value={currentStatementSpending.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })}
-            subtitle={primarySubtitle}
-          />
-          <SparkCard
-            label={previousLabel}
-            value={prevStatementSpending !== null
-              ? prevStatementSpending.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })
-              : '$0.00'}
-            change={filter.statement && prevStatementSpending !== null ? trendPct : undefined}
-            invertColor
-            stevieHighlight={stevieStatHighlight}
-          />
-          <SparkCard
-            label="Avg charge"
-            value={
-              chargeCount > 0
-                ? avgCharge.toLocaleString('en-CA', { style: 'currency', currency: 'CAD', maximumFractionDigits: 2 })
-                : '$0.00'
-            }
-            subtitle={chargeCount > 0 ? `Across ${chargeCount} charge${chargeCount !== 1 ? 's' : ''}` : 'No charges in view'}
-          />
-          <SparkCard
-            label="Refunds"
-            value={creditAmount > 0 ? `-${creditAmount.toLocaleString('en-CA', { style: 'currency', currency: 'CAD' })}` : '$0.00'}
-            valueColor={creditAmount > 0 ? 'var(--green)' : undefined}
-            subtitle={filter.category || filter.cardholder || filter.card || filter.confirmed ? 'In filtered rows' : undefined}
-          />
-        </div>
+        {(() => {
+          const showFinancialCards = filter.statement && fixedExpenses.length > 0;
+          const fixedMonthly = showFinancialCards ? monthlyFixedTotal(fixedExpenses) : 0;
+          const totalMonthly = currentStatementSpending + fixedMonthly;
+          const totalIncome = incomeSources.reduce((sum, s) => sum + s.amount, 0);
+          const surplus = totalIncome - totalMonthly;
+          const has8Cards = showFinancialCards && incomeSources.length > 0;
+
+          return (
+            <div className={`stats-summary${has8Cards ? ' stats-summary--8' : ''}`}>
+              <SparkCard
+                label={primaryLabel}
+                value={fmtMoney(currentStatementSpending)}
+                subtitle={primarySubtitle}
+              />
+              <SparkCard
+                label={previousLabel}
+                value={prevStatementSpending !== null ? fmtMoney(prevStatementSpending) : '$0.00'}
+                change={filter.statement && prevStatementSpending !== null ? trendPct : undefined}
+                invertColor
+                stevieHighlight={stevieStatHighlight}
+              />
+              <SparkCard
+                label="Avg charge"
+                value={chargeCount > 0 ? fmtMoney(avgCharge) : '$0.00'}
+                subtitle={chargeCount > 0 ? `Across ${chargeCount} charge${chargeCount !== 1 ? 's' : ''}` : 'No charges in view'}
+              />
+              <SparkCard
+                label="Refunds"
+                value={creditAmount > 0 ? `-${fmtMoney(creditAmount)}` : '$0.00'}
+                valueColor={creditAmount > 0 ? 'var(--green)' : undefined}
+                subtitle={filter.category || filter.cardholder || filter.card || filter.confirmed ? 'In filtered rows' : undefined}
+              />
+              {showFinancialCards && (
+                <>
+                  <SparkCard
+                    label="Fixed monthly expenses"
+                    value={fmtMoney(fixedMonthly)}
+                    subtitle={`${fixedExpenses.filter((e) => !e.endDate || e.endDate >= new Date().toISOString().slice(0, 10)).length} recurring`}
+                  />
+                  <SparkCard
+                    label="Total monthly spending"
+                    value={fmtMoney(totalMonthly)}
+                    subtitle="Cards + fixed expenses"
+                  />
+                  {incomeSources.length > 0 && (
+                    <SparkCard
+                      label="Monthly income"
+                      value={fmtMoney(totalIncome)}
+                      subtitle={incomeSources.map((s) => s.person).join(' + ')}
+                    />
+                  )}
+                  {incomeSources.length > 0 && (
+                    <SparkCard
+                      label="Monthly surplus"
+                      value={fmtMoney(Math.abs(surplus))}
+                      valueColor={surplus >= 0 ? 'var(--green)' : 'var(--red)'}
+                      subtitle={surplus >= 0 ? 'Left over after spending' : 'Over budget'}
+                    />
+                  )}
+                </>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       {!loading && unconfirmedCount > 0 && (
@@ -571,31 +558,18 @@ export function TransactionList({
             </tr>
           </thead>
           <tbody>
-            {displayTransactions.map((txn, index) => {
-              const isFixed = 'isFixedExpense' in txn && txn.isFixedExpense;
-              return (
-              <tr key={txn.id} className={`${txn.isCredit ? 'credit-row' : ''}${isFixed ? ' fixed-expense-row' : ''}`}>
+            {transactions.map((txn, index) => (
+              <tr key={txn.id} className={txn.isCredit ? 'credit-row' : ''}>
                 <td className="txn-index-cell">{index + 1}</td>
                 <td className="date-cell">{formatTxnDisplayDate(txn.transDate)}</td>
                 <td className="desc-cell" title={txn.description}>
-                  {isFixed && (
-                    <svg className="fixed-expense-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M17 2.1l4 4-4 4" /><path d="M3 12.2v-2a4 4 0 0 1 4-4h12.8" />
-                      <path d="M7 21.9l-4-4 4-4" /><path d="M21 11.8v2a4 4 0 0 1-4 4H4.2" />
-                    </svg>
-                  )}
                   {txn.description}
                 </td>
-                <td>{isFixed ? '' : txn.cardholder.split(' ')[0]}</td>
+                <td>{txn.cardholder.split(' ')[0]}</td>
                 <td className={`amount-cell ${txn.isCredit ? 'credit' : 'charge'}`}>
                   {formatTxnAmount(txn.amount, txn.isCredit)}
                 </td>
                 <td>
-                  {isFixed ? (
-                    <span className={`category-badge cat-${txn.category.toLowerCase().replace(/[^a-z]/g, '-')}`}>
-                      {txn.category}
-                    </span>
-                  ) : (
                   <span className="category-cell-wrapper">
                     <span className={`category-badge clickable-badge cat-${txn.category.toLowerCase().replace(/[^a-z]/g, '-')}`}>
                       {txn.category}
@@ -616,12 +590,9 @@ export function TransactionList({
                       ))}
                     </select>
                   </span>
-                  )}
                 </td>
                 <td>
-                  {isFixed ? (
-                    <span className="confirmed-badge">Fixed</span>
-                  ) : txn.confirmed ? (
+                  {txn.confirmed ? (
                     <span className="confirmed-badge">Confirmed</span>
                   ) : (
                     <span
@@ -633,8 +604,7 @@ export function TransactionList({
                   )}
                 </td>
               </tr>
-              );
-            })}
+            ))}
           </tbody>
         </table>
       </div>

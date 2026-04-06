@@ -21,6 +21,8 @@ interface Props {
   householdId: string;
   blurAmounts: boolean;
   onBlurAmountsChange: (value: boolean) => void;
+  statementMonthOffset: number;
+  onStatementMonthOffsetChange: (value: number) => void;
 }
 
 interface GenerateResult {
@@ -37,7 +39,7 @@ interface GenerateResult {
 
 type AddCardStep = 'idle' | 'label' | 'upload' | 'processing' | 'done';
 
-export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange }: Props) {
+export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange, statementMonthOffset, onStatementMonthOffsetChange }: Props) {
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [cardProfiles, setCardProfiles] = useState<(CardProfile & { id: string })[]>([]);
   const [addCardStep, setAddCardStep] = useState<AddCardStep>('idle');
@@ -579,17 +581,36 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange 
     <div className="mappings-page">
       {/* Display Section */}
       <h2>Display</h2>
-      <div className="settings-display-section">
-        <label className="fixed-expense-toggle">
-          <input
-            type="checkbox"
-            checked={blurAmounts}
-            onChange={(e) => onBlurAmountsChange(e.target.checked)}
-          />
-          <span className="fixed-expense-toggle-track" />
-          <span className="fixed-expense-toggle-label">Blur amounts</span>
-        </label>
-        <span className="hint" style={{ margin: 0 }}>Hide dollar values on the dashboard for privacy</span>
+      <p className="hint">Appearance and display preferences.</p>
+      <div className="settings-card">
+        <div className="settings-card-row">
+          <div className="settings-card-row-info">
+            <span className="settings-card-row-title">Blur amounts</span>
+            <span className="settings-card-row-desc">Hide dollar values throughout the app for privacy</span>
+          </div>
+          <label className="fixed-expense-toggle">
+            <input
+              type="checkbox"
+              checked={blurAmounts}
+              onChange={(e) => onBlurAmountsChange(e.target.checked)}
+            />
+            <span className="fixed-expense-toggle-track" />
+          </label>
+        </div>
+        <div className="settings-card-row">
+          <div className="settings-card-row-info">
+            <span className="settings-card-row-title">Statement month offset</span>
+            <span className="settings-card-row-desc">Show statement as the prior month's spending (e.g. Apr statement = March)</span>
+          </div>
+          <label className="fixed-expense-toggle">
+            <input
+              type="checkbox"
+              checked={statementMonthOffset !== 0}
+              onChange={(e) => onStatementMonthOffsetChange(e.target.checked ? -1 : 0)}
+            />
+            <span className="fixed-expense-toggle-track" />
+          </label>
+        </div>
       </div>
 
       {/* Card Profiles Section */}
@@ -898,7 +919,7 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange 
       </p>
 
       <div className="table-wrapper">
-        <table className="transactions-table fixed-expenses-table">
+        <table className="transactions-table mappings-income-table">
           <thead>
             <tr>
               <th>Person</th>
@@ -912,7 +933,7 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange 
                 <td className="mapping-cell-primary">
                   <strong>{inc.person}</strong>
                 </td>
-                <td className="mapping-cell-meta fixed-expense-amount">
+                <td className="mapping-cell-meta income-amount">
                   ${inc.amount.toLocaleString('en-CA', { minimumFractionDigits: 2 })}/mo
                 </td>
                 <td className="mapping-cell-actions">
