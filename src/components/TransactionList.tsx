@@ -2,12 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { collection, getDocs, doc, updateDoc, query, where, addDoc, writeBatch, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { CATEGORIES } from '../types';
-import type { FixedExpense, IncomeSource } from '../types';
 import { extractMerchantPattern } from '../lib/categorize';
-import { monthlyFixedTotal } from '../lib/fixedExpenses';
 import { PARENT_CATEGORY_NAMES, transactionMatchesCategoryFilter } from '../lib/categoryGroups';
 import { SparkCard } from './ui/SparkCard';
 import { FilterSelect } from './ui/FilterSelect';
+import { Modal, ModalBodyPanel } from './ui/Modal';
 import { reconcileBillingPeriod } from '../lib/statementPeriod';
 import { offsetStatementDropdownLabel } from '../lib/statementMonthOffset';
 import type { StevieMoodReport } from '../lib/stevieMood';
@@ -23,6 +22,8 @@ interface Transaction {
   cardholder: string;
   category: string;
   confirmed: boolean;
+  reimbursed?: boolean;
+  partialPayAmount?: number;
   cardProfileId?: string;
 }
 
@@ -140,30 +141,10 @@ export function TransactionList({
     setCardProfiles(snap.docs.map((d) => ({ id: d.id, ...d.data() } as CardProfileInfo)));
   };
 
-  const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
-  const fetchFixedExpenses = async () => {
-    try {
-      const snap = await getDocs(collection(db, 'households', householdId, 'fixedExpenses'));
-      setFixedExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as FixedExpense)));
-    } catch {
-      setFixedExpenses([]);
-    }
-  };
-
-  const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([]);
-  const fetchIncomeSources = async () => {
-    try {
-      const snap = await getDocs(collection(db, 'households', householdId, 'incomeSources'));
-      setIncomeSources(snap.docs.map((d) => ({ id: d.id, ...d.data() } as IncomeSource)));
-    } catch {
-      setIncomeSources([]);
-    }
-  };
-
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      await Promise.all([fetchTransactions(), fetchStatements(), fetchCardProfiles(), fetchFixedExpenses(), fetchIncomeSources()]);
+      await Promise.all([fetchTransactions(), fetchStatements(), fetchCardProfiles()]);
       setLoading(false);
     };
     load();
@@ -209,18 +190,62 @@ export function TransactionList({
     onUpdate();
   };
 
-  const confirmCategory = async (id: string, description: string) => {
-    const pattern = extractMerchantPattern(description);
+  const [editingPartialPay, setEditingPartialPay] = useState<string | null>(null);
+  const [partialPayInput, setPartialPayInput] = useState('');
+
+  const updateStatus = async (id: string, description: string, status: 'confirmed' | 'unconfirmed' | 'reimbursed' | 'partial') => {
     const txnRef = doc(db, 'households', householdId, 'transactions', id);
-    const txn = transactions.find((t) => t.id === id);
-    await updateDoc(txnRef, { confirmed: true });
-
-    if (pattern && txn) {
-      await saveMerchantMapping(pattern, txn.category, txn.cardProfileId);
+    if (status === 'partial') {
+      const txn = allTransactions.find((t) => t.id === id);
+      setEditingPartialPay(id);
+      setPartialPayInput(txn?.partialPayAmount?.toString() ?? '');
+      return;
     }
-
+    if (status === 'reimbursed') {
+      await updateDoc(txnRef, { reimbursed: true, confirmed: true, partialPayAmount: null });
+    } else if (status === 'confirmed') {
+      await updateDoc(txnRef, { confirmed: true, reimbursed: false, partialPayAmount: null });
+      const pattern = extractMerchantPattern(description);
+      const txn = allTransactions.find((t) => t.id === id);
+      if (pattern && txn) {
+        await saveMerchantMapping(pattern, txn.category, txn.cardProfileId);
+      }
+    } else {
+      await updateDoc(txnRef, { confirmed: false, reimbursed: false, partialPayAmount: null });
+    }
     fetchTransactions();
     onUpdate();
+  };
+
+  const savePartialPay = async (id: string) => {
+    const val = parseFloat(partialPayInput);
+    const txn = allTransactions.find((t) => t.id === id);
+    if (!txn || isNaN(val) || val <= 0 || val >= txn.amount) {
+      setEditingPartialPay(null);
+      return;
+    }
+    const txnRef = doc(db, 'households', householdId, 'transactions', id);
+    await updateDoc(txnRef, { partialPayAmount: Math.round(val * 100) / 100, confirmed: true, reimbursed: false });
+    setEditingPartialPay(null);
+    fetchTransactions();
+    onUpdate();
+  };
+
+  type StatusValue = 'confirmed' | 'unconfirmed' | 'reimbursed' | 'partial';
+
+  const getStatusValue = (txn: Transaction): StatusValue => {
+    if (txn.reimbursed) return 'reimbursed';
+    if (txn.partialPayAmount != null && txn.partialPayAmount > 0) return 'partial';
+    if (txn.confirmed) return 'confirmed';
+    return 'unconfirmed';
+  };
+
+  const getStatusLabel = (txn: Transaction): string => {
+    const status = getStatusValue(txn);
+    if (status === 'partial') return `Partial $${txn.partialPayAmount!.toFixed(2)}`;
+    if (status === 'reimbursed') return 'Reimbursed';
+    if (status === 'confirmed') return 'Confirmed';
+    return 'Unconfirmed';
   };
 
   const confirmAll = async () => {
@@ -277,6 +302,14 @@ export function TransactionList({
   const creditAmount = transactions
     .filter((t) => t.isCredit && t.category !== 'Payment')
     .reduce((sum, t) => sum + t.amount, 0);
+  const reimbursedAmount = transactions
+    .filter((t) => !t.isCredit && (t.reimbursed || (t.partialPayAmount != null && t.partialPayAmount > 0)))
+    .reduce((sum, t) => {
+      if (t.reimbursed) return sum + t.amount;
+      // partial pay: the difference is the reimbursed portion
+      return sum + (t.amount - t.partialPayAmount!);
+    }, 0);
+  const totalRefunds = creditAmount + reimbursedAmount;
 
   const matchesNonStatementFilters = (t: Transaction) => {
     if (filter.category && !transactionMatchesCategoryFilter(t.category, filter.category)) return false;
@@ -295,9 +328,13 @@ export function TransactionList({
 
   const prevStatement = (() => {
     if (!filter.statement || statements.length < 2) return null;
-    const currentIdx = statements.findIndex((s) => s.id === filter.statement);
-    if (currentIdx < 0 || currentIdx >= statements.length - 1) return null;
-    return statements[currentIdx + 1];
+    const currentStmt = statements.find((s) => s.id === filter.statement);
+    if (!currentStmt) return null;
+    // Only compare against statements from the same card
+    const sameCardStatements = statements.filter((s) => s.cardProfileId === currentStmt.cardProfileId);
+    const sameCardIdx = sameCardStatements.indexOf(currentStmt);
+    if (sameCardIdx < 0 || sameCardIdx >= sameCardStatements.length - 1) return null;
+    return sameCardStatements[sameCardIdx + 1];
   })();
 
   const prevStatementSpending = (() => {
@@ -443,71 +480,37 @@ export function TransactionList({
         />
       </div>
       <div className="transactions-toolbar">
-        {(() => {
-          const showFinancialCards = filter.statement && fixedExpenses.length > 0;
-          const fixedMonthly = showFinancialCards ? monthlyFixedTotal(fixedExpenses) : 0;
-          const totalMonthly = currentStatementSpending + fixedMonthly;
-          const totalIncome = incomeSources.reduce((sum, s) => sum + s.amount, 0);
-          const surplus = totalIncome - totalMonthly;
-          const has8Cards = showFinancialCards && incomeSources.length > 0;
-
-          return (
-            <div className={`stats-summary${has8Cards ? ' stats-summary--8' : ''}`}>
-              <SparkCard
-                label={primaryLabel}
-                value={fmtMoney(currentStatementSpending)}
-                subtitle={primarySubtitle}
-              />
-              <SparkCard
-                label={previousLabel}
-                value={prevStatementSpending !== null ? fmtMoney(prevStatementSpending) : '$0.00'}
-                change={filter.statement && prevStatementSpending !== null ? trendPct : undefined}
-                invertColor
-                stevieHighlight={stevieStatHighlight}
-              />
-              <SparkCard
-                label="Avg charge"
-                value={chargeCount > 0 ? fmtMoney(avgCharge) : '$0.00'}
-                subtitle={chargeCount > 0 ? `Across ${chargeCount} charge${chargeCount !== 1 ? 's' : ''}` : 'No charges in view'}
-              />
-              <SparkCard
-                label="Refunds"
-                value={creditAmount > 0 ? `-${fmtMoney(creditAmount)}` : '$0.00'}
-                valueColor={creditAmount > 0 ? 'var(--green)' : undefined}
-                subtitle={filter.category || filter.cardholder || filter.card || filter.confirmed ? 'In filtered rows' : undefined}
-              />
-              {showFinancialCards && (
-                <>
-                  <SparkCard
-                    label="Fixed monthly expenses"
-                    value={fmtMoney(fixedMonthly)}
-                    subtitle={`${fixedExpenses.filter((e) => !e.endDate || e.endDate >= new Date().toISOString().slice(0, 10)).length} recurring`}
-                  />
-                  <SparkCard
-                    label="Total monthly spending"
-                    value={fmtMoney(totalMonthly)}
-                    subtitle="Cards + fixed expenses"
-                  />
-                  {incomeSources.length > 0 && (
-                    <SparkCard
-                      label="Monthly income"
-                      value={fmtMoney(totalIncome)}
-                      subtitle={incomeSources.map((s) => s.person).join(' + ')}
-                    />
-                  )}
-                  {incomeSources.length > 0 && (
-                    <SparkCard
-                      label="Monthly surplus"
-                      value={fmtMoney(Math.abs(surplus))}
-                      valueColor={surplus >= 0 ? 'var(--green)' : 'var(--red)'}
-                      subtitle={surplus >= 0 ? 'Left over after spending' : 'Over budget'}
-                    />
-                  )}
-                </>
-              )}
-            </div>
-          );
-        })()}
+        <div className="stats-summary">
+          <SparkCard
+            label={primaryLabel}
+            value={fmtMoney(currentStatementSpending)}
+            subtitle={primarySubtitle}
+          />
+          <SparkCard
+            label={previousLabel}
+            value={prevStatementSpending !== null ? fmtMoney(prevStatementSpending) : '$0.00'}
+            change={filter.statement && prevStatementSpending !== null ? trendPct : undefined}
+            invertColor
+            stevieHighlight={stevieStatHighlight}
+          />
+          <SparkCard
+            label="Avg charge"
+            value={chargeCount > 0 ? fmtMoney(avgCharge) : '$0.00'}
+            subtitle={chargeCount > 0 ? `Across ${chargeCount} charge${chargeCount !== 1 ? 's' : ''}` : 'No charges in view'}
+          />
+          <SparkCard
+            label="Refunds"
+            value={totalRefunds > 0 ? `-${fmtMoney(totalRefunds)}` : '$0.00'}
+            valueColor={totalRefunds > 0 ? 'var(--green)' : undefined}
+            subtitle={
+              totalRefunds > 0 && reimbursedAmount > 0
+                ? `${fmtMoney(reimbursedAmount)} reimbursed`
+                : filter.category || filter.cardholder || filter.card || filter.confirmed
+                  ? 'In filtered rows'
+                  : undefined
+            }
+          />
+        </div>
       </div>
 
       {!loading && unconfirmedCount > 0 && (
@@ -566,8 +569,15 @@ export function TransactionList({
                   {txn.description}
                 </td>
                 <td>{txn.cardholder.split(' ')[0]}</td>
-                <td className={`amount-cell ${txn.isCredit ? 'credit' : 'charge'}`}>
-                  {formatTxnAmount(txn.amount, txn.isCredit)}
+                <td className={`amount-cell ${txn.isCredit || txn.reimbursed ? 'credit' : 'charge'}`}>
+                  {txn.partialPayAmount != null && txn.partialPayAmount > 0 ? (
+                    <span className="partial-pay-amount">
+                      <span className="partial-pay-original">{formatTxnAmount(txn.amount, false)}</span>
+                      <span className="partial-pay-actual">{formatTxnAmount(txn.partialPayAmount, false)}</span>
+                    </span>
+                  ) : (
+                    formatTxnAmount(txn.amount, txn.isCredit)
+                  )}
                 </td>
                 <td>
                   <span className="category-cell-wrapper">
@@ -592,16 +602,25 @@ export function TransactionList({
                   </span>
                 </td>
                 <td>
-                  {txn.confirmed ? (
-                    <span className="confirmed-badge">Confirmed</span>
-                  ) : (
-                    <span
-                      className="unconfirmed-badge clickable-badge"
-                      onClick={() => confirmCategory(txn.id, txn.description)}
-                    >
-                      Unconfirmed
+                  <span className="status-cell-wrapper">
+                    <span className={`${getStatusValue(txn)}-badge`}>
+                      {getStatusLabel(txn)}
                     </span>
-                  )}
+                    <select
+                      className="status-overlay-select"
+                      value=""
+                      onChange={(e) => {
+                        const newStatus = e.target.value as StatusValue;
+                        if (newStatus) updateStatus(txn.id, txn.description, newStatus);
+                      }}
+                    >
+                      <option value="" disabled>Change status...</option>
+                      <option value="confirmed">Confirmed</option>
+                      <option value="unconfirmed">Unconfirmed</option>
+                      <option value="reimbursed">Reimbursed</option>
+                      <option value="partial">Partial pay...</option>
+                    </select>
+                  </span>
                 </td>
               </tr>
             ))}
@@ -616,6 +635,46 @@ export function TransactionList({
             : 'No transactions match the current filters.'}
         </p>
       )}
+      {(() => {
+        const txn = editingPartialPay ? allTransactions.find((t) => t.id === editingPartialPay) : null;
+        return (
+          <Modal
+            open={!!editingPartialPay}
+            onClose={() => setEditingPartialPay(null)}
+            title="Partial pay"
+            description={txn ? `${txn.description} — ${fmtMoney(txn.amount)}` : ''}
+          >
+            <ModalBodyPanel>
+              <label className="partial-pay-field">
+                <span className="partial-pay-field-label">Amount you paid</span>
+                <input
+                  type="number"
+                  className="partial-pay-input"
+                  value={partialPayInput}
+                  onChange={(e) => setPartialPayInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') { e.preventDefault(); savePartialPay(editingPartialPay!); }
+                  }}
+                  autoFocus
+                  min={0}
+                  max={txn?.amount}
+                  step={0.01}
+                  placeholder="0.00"
+                />
+              </label>
+              {txn && partialPayInput && !isNaN(parseFloat(partialPayInput)) && parseFloat(partialPayInput) > 0 && parseFloat(partialPayInput) < txn.amount && (
+                <p className="partial-pay-summary">
+                  {fmtMoney(txn.amount - parseFloat(partialPayInput))} will count as reimbursed
+                </p>
+              )}
+            </ModalBodyPanel>
+            <div className="edit-card-panel-actions">
+              <button className="btn" onClick={() => setEditingPartialPay(null)}>Cancel</button>
+              <button className="btn btn-save" onClick={() => savePartialPay(editingPartialPay!)}>Save</button>
+            </div>
+          </Modal>
+        );
+      })()}
     </div>
   );
 }

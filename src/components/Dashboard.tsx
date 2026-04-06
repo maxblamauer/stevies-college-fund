@@ -108,7 +108,7 @@ function buildGroupedCategories(byCategory: CategoryStat[]): GroupedCategory[] {
 
 interface CategoryStat { category: string; total: number; count: number; }
 interface StatementInfo { id: string; statementDate: string; periodStart: string; periodEnd: string; totalBalance: number; filename: string; cardProfileId?: string; }
-interface TransactionDoc { statementId: string; transDate: string; amount: number; isCredit: boolean; cardholder: string; category: string; cardProfileId?: string; }
+interface TransactionDoc { statementId: string; transDate: string; amount: number; isCredit: boolean; cardholder: string; category: string; cardProfileId?: string; reimbursed?: boolean; partialPayAmount?: number; }
 
 interface CardProfileInfo { id: string; cardLabel: string; bankName: string; }
 
@@ -245,27 +245,114 @@ export function Dashboard({
   // Pie data — use parent-grouped totals; show top spenders as individual slices, merge the tail
   const groupedForPie = buildGroupedCategories(byCategory);
   const sortedPieGroups = [...groupedForPie].sort((a, b) => b.total - a.total);
-  const mainSlices: { id: string; label: string; value: number; color: string }[] = [];
+
+  // Compute per-category reimbursed amounts for pie
+  const pieReimbByCategory = new Map<string, number>();
+  for (const t of filteredCardTxns) {
+    if (selectedStatement && t.statementId !== selectedStatement) continue;
+    let reimbAmt = 0;
+    if (t.reimbursed) reimbAmt = t.amount;
+    else if (t.partialPayAmount != null && t.partialPayAmount > 0) reimbAmt = t.amount - t.partialPayAmount;
+    if (reimbAmt > 0) {
+      pieReimbByCategory.set(t.category, (pieReimbByCategory.get(t.category) || 0) + reimbAmt);
+    }
+  }
+
+  const mainSlices: { id: string; label: string; value: number; color: string; reimbPct: number }[] = [];
   let otherTotal = 0;
   let otherCount = 0;
+  let otherReimb = 0;
   for (let i = 0; i < sortedPieGroups.length; i++) {
     const g = sortedPieGroups[i];
     if (i < PIE_MAX_INDIVIDUAL_SLICES) {
+      let groupReimb = 0;
+      if (g.isParent && g.children) {
+        for (const child of g.children) groupReimb += pieReimbByCategory.get(child.category) || 0;
+      } else {
+        groupReimb = pieReimbByCategory.get(g.name) || 0;
+      }
       mainSlices.push({
         id: g.name,
         label: g.name,
         value: Math.round(g.total * 100) / 100,
         color: g.color,
+        reimbPct: g.total > 0 ? groupReimb / g.total : 0,
       });
     } else {
       otherTotal += g.total;
       otherCount++;
+      if (g.isParent && g.children) {
+        for (const child of g.children) otherReimb += pieReimbByCategory.get(child.category) || 0;
+      } else {
+        otherReimb += pieReimbByCategory.get(g.name) || 0;
+      }
     }
   }
   if (otherTotal > 0) {
     const label = `${otherCount} smaller categor${otherCount === 1 ? 'y' : 'ies'}`;
-    mainSlices.push({ id: '__grouped__', label, value: Math.round(otherTotal * 100) / 100, color: getColor('Other') });
+    mainSlices.push({
+      id: '__grouped__',
+      label,
+      value: Math.round(otherTotal * 100) / 100,
+      color: getColor('Other'),
+      reimbPct: otherTotal > 0 ? otherReimb / otherTotal : 0,
+    });
   }
+
+  // Custom pie layer: draw hatched overlay on the reimbursed portion of each arc
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ReimbursedOverlay = (props: any) => {
+    const { dataWithArc, centerX, centerY } = props;
+    if (!dataWithArc) return null;
+    const patternId = 'pie-reimb-hatch';
+
+    const makeArcPath = (sa: number, ea: number, ir: number, or2: number) => {
+      // SVG arc from startAngle to endAngle (radians, 0 = top, clockwise)
+      const sx = or2 * Math.sin(sa);
+      const sy = -or2 * Math.cos(sa);
+      const ex = or2 * Math.sin(ea);
+      const ey = -or2 * Math.cos(ea);
+      const ix = ir * Math.sin(ea);
+      const iy = -ir * Math.cos(ea);
+      const jx = ir * Math.sin(sa);
+      const jy = -ir * Math.cos(sa);
+      const la = ea - sa > Math.PI ? 1 : 0;
+      return `M${sx},${sy} A${or2},${or2} 0 ${la} 1 ${ex},${ey} L${ix},${iy} A${ir},${ir} 0 ${la} 0 ${jx},${jy} Z`;
+    };
+
+    return (
+      <g transform={`translate(${centerX},${centerY})`}>
+        <defs>
+          <pattern id={patternId} patternUnits="userSpaceOnUse" width="8" height="8" patternTransform="rotate(-45)">
+            <line x1="0" y1="0" x2="0" y2="8" stroke="rgba(255,255,255,0.5)" strokeWidth="4" />
+          </pattern>
+        </defs>
+        {dataWithArc.map((datum: any) => {
+          const slice = mainSlices.find((s) => s.id === datum.id);
+          if (!slice || slice.reimbPct <= 0) return null;
+          const a = datum.arc;
+          const ir = typeof a.innerRadius === 'number' ? a.innerRadius : 0;
+          const or2 = typeof a.outerRadius === 'number' ? a.outerRadius : 0;
+          if (!or2) return null;
+          const totalAngle = a.endAngle - a.startAngle;
+          // Cap so hatching never covers more than 45% of the arc from the end,
+          // keeping a clear padding around the centered percentage label
+          const cappedPct = Math.min(slice.reimbPct, 0.35);
+          const reimbAngle = totalAngle * cappedPct;
+          // Hatch the end portion of the arc
+          const reimbStart = a.endAngle - reimbAngle;
+          return (
+            <path
+              key={String(datum.id)}
+              d={makeArcPath(reimbStart, a.endAngle, ir, or2)}
+              fill={`url(#${patternId})`}
+              style={{ pointerEvents: 'none' }}
+            />
+          );
+        })}
+      </g>
+    );
+  };
 
   // Statement totals for line chart — only statements that belong to this card (or legacy stmts with
   // matching txns), so the trend / averages / day span don’t mix in other cards’ periods or $0 points.
@@ -401,7 +488,7 @@ export function Dashboard({
   };
 
   // For bar chart x-axis: show every Nth label if there are too many
-  const barTickInterval = dailySpending.length > 15 ? 2 : 1;
+  const barTickInterval = dailySpending.length > 20 ? 3 : dailySpending.length > 10 ? 2 : 1;
   const barTickValues = dailySpending
     .map((d, i) => (i % barTickInterval === 0 ? d.transDate.slice(5) : null))
     .filter(Boolean) as string[];
@@ -555,7 +642,7 @@ export function Dashboard({
         </div>
       ) : (
         <>
-          <div className={`stats-summary${selectedStatement && fixedExpenses.length > 0 && incomeSources.length > 0 ? ' stats-summary--8' : ''}`}>
+          <div className="stats-summary">
             <SparkCard
               label={selectedStatement ? 'Statement period' : 'Total spending'}
               value={
@@ -565,7 +652,12 @@ export function Dashboard({
                     : '$0.00'
                   : fmtMoney(totalSpending)
               }
-              change={selectedStatement ? selectedSpendingChange : (stmtTotals.length > 1 ? spendingChange : undefined)}
+              change={
+                // Hide trend when viewing all cards with multiple cards (cross-card comparison is misleading)
+                showCardFilter && !selectedCard
+                  ? undefined
+                  : selectedStatement ? selectedSpendingChange : (stmtTotals.length > 1 ? spendingChange : undefined)
+              }
               invertColor
               stevieHighlight={stevieStatHighlight}
             />
@@ -594,46 +686,77 @@ export function Dashboard({
               value={groupedForPie.length > 0 ? groupedForPie[0].name : '--'}
               subtitle={groupedForPie.length > 0 ? fmtMoney(groupedForPie[0].total) : undefined}
             />
-            {selectedStatement && fixedExpenses.length > 0 && (() => {
-              const fixedMonthly = monthlyFixedTotal(fixedExpenses);
-              const cardPortion = selectedStatement
-                ? focusIdx >= 0 ? focusTotal : 0
-                : latestTotal;
-              const totalMonthly = cardPortion + fixedMonthly;
-              const totalIncome = incomeSources.reduce((sum, s) => sum + s.amount, 0);
-              const surplus = totalIncome - totalMonthly;
-
-              return (
-                <>
-                  <SparkCard
-                    label="Fixed monthly expenses"
-                    value={fmtMoney(fixedMonthly)}
-                    subtitle={`${fixedExpenses.filter((e) => !e.endDate || e.endDate >= new Date().toISOString().slice(0, 10)).length} recurring`}
-                  />
-                  <SparkCard
-                    label="Total monthly spending"
-                    value={fmtMoney(totalMonthly)}
-                    subtitle="Cards + fixed expenses"
-                  />
-                  {incomeSources.length > 0 && (
-                    <SparkCard
-                      label="Monthly income"
-                      value={fmtMoney(totalIncome)}
-                      subtitle={incomeSources.map((s) => s.person).join(' + ')}
-                    />
-                  )}
-                  {incomeSources.length > 0 && (
-                    <SparkCard
-                      label="Monthly surplus"
-                      value={fmtMoney(Math.abs(surplus))}
-                      valueColor={surplus >= 0 ? 'var(--green)' : 'var(--red)'}
-                      subtitle={surplus >= 0 ? 'Left over after spending' : 'Over budget'}
-                    />
-                  )}
-                </>
-              );
-            })()}
           </div>
+          {selectedStatement && fixedExpenses.length > 0 && (() => {
+            const fixedMonthly = monthlyFixedTotal(fixedExpenses);
+            // Include spending from other cards in the same month
+            const selectedStmtInfo = focusStmt;
+            const selectedMonthLabel = selectedStmtInfo
+              ? offsetStatementLabel(selectedStmtInfo.statementDate, statementMonthOffset)
+              : '';
+            const sameMonthStmtIds = new Set(
+              statements
+                .filter((s) => offsetStatementLabel(s.statementDate, statementMonthOffset) === selectedMonthLabel)
+                .map((s) => s.id)
+            );
+            const allCardsMonthlySpending = allTransactions
+              .filter((t) => !t.isCredit && sameMonthStmtIds.has(t.statementId))
+              .reduce((sum, t) => {
+                if (t.reimbursed) return sum; // fully reimbursed — don't count
+                if (t.partialPayAmount != null && t.partialPayAmount > 0) return sum + t.partialPayAmount;
+                return sum + t.amount;
+              }, 0);
+            const cardPortion = selectedMonthLabel ? allCardsMonthlySpending : (focusIdx >= 0 ? focusTotal : 0);
+            const totalMonthly = cardPortion + fixedMonthly;
+            const totalIncome = incomeSources.reduce((sum, s) => sum + s.amount, 0);
+            const surplus = totalIncome - totalMonthly;
+            const creditAmount = allTransactions
+              .filter((t) => t.isCredit && t.category !== 'Payment' && sameMonthStmtIds.has(t.statementId))
+              .reduce((sum, t) => sum + t.amount, 0);
+            const reimbursedAmount = allTransactions
+              .filter((t) => !t.isCredit && sameMonthStmtIds.has(t.statementId) && (t.reimbursed || (t.partialPayAmount != null && t.partialPayAmount > 0)))
+              .reduce((sum, t) => {
+                if (t.reimbursed) return sum + t.amount;
+                return sum + (t.amount - t.partialPayAmount!);
+              }, 0);
+            const totalRefunds = creditAmount + reimbursedAmount;
+
+            return (
+              <div className="stats-summary stats-summary--5">
+                {incomeSources.length > 0 && (
+                  <SparkCard
+                    label="Monthly income"
+                    value={fmtMoney(totalIncome)}
+                    subtitle={incomeSources.map((s) => s.person).join(' + ')}
+                  />
+                )}
+                <SparkCard
+                  label="Fixed monthly expenses"
+                  value={fmtMoney(fixedMonthly)}
+                  subtitle={`${fixedExpenses.filter((e) => !e.endDate || e.endDate >= new Date().toISOString().slice(0, 10)).length} recurring`}
+                />
+                <SparkCard
+                  label="Total monthly spending"
+                  value={fmtMoney(totalMonthly)}
+                  subtitle={sameMonthStmtIds.size > 1 ? 'All cards + fixed expenses' : 'Cards + fixed expenses'}
+                />
+                <SparkCard
+                  label="Refunds"
+                  value={totalRefunds > 0 ? `-${fmtMoney(totalRefunds)}` : '$0.00'}
+                  valueColor={totalRefunds > 0 ? 'var(--green)' : undefined}
+                  subtitle={reimbursedAmount > 0 ? `${fmtMoney(reimbursedAmount)} reimbursed` : undefined}
+                />
+                {incomeSources.length > 0 && (
+                  <SparkCard
+                    label="Monthly surplus"
+                    value={fmtMoney(Math.abs(surplus))}
+                    valueColor={surplus >= 0 ? 'var(--green)' : 'var(--red)'}
+                    subtitle={surplus >= 0 ? 'Left over after spending' : 'Over budget'}
+                  />
+                )}
+              </div>
+            );
+          })()}
 
           <div className="charts-grid">
             {!selectedStatement && showCardFilter && !selectedCard && (() => {
@@ -774,15 +897,15 @@ export function Dashboard({
                     }))}
                     keys={['amount']}
                     indexBy="day"
-                    margin={{ top: 10, right: 10, bottom: 55, left: 55 }}
+                    margin={{ top: 10, right: 10, bottom: 40, left: 55 }}
                     padding={0.35}
                     colors={[isDark ? '#8b7fd4' : '#7b6fc4']}
                     theme={nivoTheme}
                     axisLeft={{ format: (v) => `$${Number(v).toLocaleString()}`, tickSize: 0, tickPadding: 6, tickValues: 5 }}
                     axisBottom={{
                       tickSize: 0,
-                      tickPadding: 8,
-                      tickRotation: -45,
+                      tickPadding: 6,
+                      tickRotation: 0,
                       tickValues: barTickValues,
                     }}
                     enableGridX={false}
@@ -811,6 +934,7 @@ export function Dashboard({
                   colors={(d) => d.data.color}
                   borderWidth={0}
                   theme={nivoTheme}
+                  layers={['arcs', ReimbursedOverlay as any, 'arcLabels', 'legends']}
                   enableArcLinkLabels={false}
                   arcLabelsSkipAngle={18}
                   arcLabelsTextColor="#ffffff"
@@ -852,11 +976,24 @@ export function Dashboard({
               {(() => {
                 const grouped = buildGroupedCategories(byCategory);
                 const maxTotal = grouped.length > 0 ? grouped[0].total : 1;
+                // Compute per-category reimbursed amounts (fully reimbursed + partial pay difference)
+                const reimbursedByCategory = new Map<string, number>();
+                for (const t of filteredCardTxns) {
+                  if (selectedStatement && t.statementId !== selectedStatement) continue;
+                  let reimbAmt = 0;
+                  if (t.reimbursed) reimbAmt = t.amount;
+                  else if (t.partialPayAmount != null && t.partialPayAmount > 0) reimbAmt = t.amount - t.partialPayAmount;
+                  if (reimbAmt > 0) {
+                    reimbursedByCategory.set(t.category, (reimbursedByCategory.get(t.category) || 0) + reimbAmt);
+                  }
+                }
                 return grouped.map((group) => {
                   const pct = (group.total / totalSpending) * 100;
                   const isExpanded = expandedGroups.has(group.name);
 
                   if (!group.isParent) {
+                    const reimb = reimbursedByCategory.get(group.name) || 0;
+                    const reimbPct = group.total > 0 ? (reimb / group.total) * 100 : 0;
                     return (
                       <div key={group.name} className="category-bar-row clickable" onClick={() => onCategoryClick(group.name)}>
                         <div className="category-bar-label">
@@ -864,7 +1001,11 @@ export function Dashboard({
                           {group.name}
                         </div>
                         <div className="category-bar-track">
-                          <div className="category-bar-fill" style={{ width: `${(group.total / maxTotal) * 100}%`, background: group.color }} />
+                          <div className="category-bar-fill" style={{ width: `${(group.total / maxTotal) * 100}%`, background: group.color }}>
+                            {reimbPct > 0 && (
+                              <div className="category-bar-reimb" style={{ width: `${reimbPct}%` }} title={`${fmtMoney(reimb)} reimbursed`} />
+                            )}
+                          </div>
                         </div>
                         <div className="category-bar-amount">{fmtMoney(group.total)}</div>
                         <div className="category-bar-pct">{pct.toFixed(1)}%</div>
@@ -872,6 +1013,11 @@ export function Dashboard({
                       </div>
                     );
                   }
+
+                  const groupReimb = group.children
+                    ? group.children.reduce((sum, c) => sum + (reimbursedByCategory.get(c.category) || 0), 0)
+                    : 0;
+                  const groupReimbPct = group.total > 0 ? (groupReimb / group.total) * 100 : 0;
 
                   return (
                     <div key={group.name} className="category-group">
@@ -892,7 +1038,11 @@ export function Dashboard({
                           <span className="cat-sub-count">({group.children!.length})</span>
                         </div>
                         <div className="category-bar-track">
-                          <div className="category-bar-fill" style={{ width: `${(group.total / maxTotal) * 100}%`, background: group.color }} />
+                          <div className="category-bar-fill" style={{ width: `${(group.total / maxTotal) * 100}%`, background: group.color }}>
+                            {groupReimbPct > 0 && (
+                              <div className="category-bar-reimb" style={{ width: `${groupReimbPct}%` }} title={`${fmtMoney(groupReimb)} reimbursed`} />
+                            )}
+                          </div>
                         </div>
                         <div className="category-bar-amount">{fmtMoney(group.total)}</div>
                         <div className="category-bar-pct">{pct.toFixed(1)}%</div>
@@ -903,6 +1053,8 @@ export function Dashboard({
                           {group.children.map((child) => {
                             const childPct = (child.total / totalSpending) * 100;
                             const childColor = getColor(child.category);
+                            const childReimb = reimbursedByCategory.get(child.category) || 0;
+                            const childReimbPct = child.total > 0 ? (childReimb / child.total) * 100 : 0;
                             return (
                               <div
                                 key={child.category}
@@ -914,7 +1066,11 @@ export function Dashboard({
                                   {child.category}
                                 </div>
                                 <div className="category-bar-track">
-                                  <div className="category-bar-fill" style={{ width: `${(child.total / maxTotal) * 100}%`, background: childColor }} />
+                                  <div className="category-bar-fill" style={{ width: `${(child.total / maxTotal) * 100}%`, background: childColor }}>
+                                    {childReimbPct > 0 && (
+                                      <div className="category-bar-reimb" style={{ width: `${childReimbPct}%` }} title={`${fmtMoney(childReimb)} reimbursed`} />
+                                    )}
+                                  </div>
                                 </div>
                                 <div className="category-bar-amount">{fmtMoney(child.total)}</div>
                                 <div className="category-bar-pct">{childPct.toFixed(1)}%</div>
