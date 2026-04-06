@@ -752,7 +752,6 @@ export function Dashboard({
             const totalRefunds = creditAmount + reimbursedAmount;
             const surplus = totalIncome - totalMonthly + totalRefunds;
 
-            const netSpend = totalMonthly - totalRefunds;
 
             return (
               <div className="stats-summary stats-summary--5">
