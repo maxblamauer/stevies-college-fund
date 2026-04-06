@@ -6,7 +6,9 @@ interface SparkCardProps {
   invertColor?: boolean;
   valueColor?: string;
   changeTooltip?: string;
-  /** Mood-coloured ring while Stevie’s note is open (green = happy/good context, red = worried) */
+  /** Tooltip shown on hover over the card */
+  tooltip?: string;
+  /** Mood-coloured ring while Stevie's note is open (green = happy/good context, red = worried) */
   stevieHighlight?: 'good' | 'bad' | null;
 }
 
@@ -18,6 +20,7 @@ export function SparkCard({
   invertColor,
   valueColor,
   changeTooltip,
+  tooltip,
   stevieHighlight = null,
 }: SparkCardProps) {
   const changeIsGood = invertColor ? (change ?? 0) < 0 : (change ?? 0) > 0;
@@ -52,8 +55,9 @@ export function SparkCard({
         : '';
 
   return (
-    <div className={`spark-card${stevieToneClass}`}>
+    <div className={`spark-card${stevieToneClass}${tooltip ? ' has-tooltip' : ''}`}>
       <div className="spark-card-label">{label}</div>
+      {tooltip && <span className="tooltip spark-card-tooltip">{tooltip}</span>}
       <div className="spark-card-body spark-card-body--plain">
         <div className="spark-card-value" style={valueColor ? { color: valueColor } : undefined}>
           {value}

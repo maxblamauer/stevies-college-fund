@@ -244,11 +244,22 @@ export function Dashboard({
 
   const totalSpending = byCategory.reduce((sum, c) => sum + c.total, 0);
 
+  // Net total spending (charges minus non-Payment credits) for display in the summary card
+  const totalCredits = allTransactions.filter((t) => {
+    if (!t.isCredit || t.category === 'Payment') return false;
+    if (cardholder && t.cardholder !== cardholder) return false;
+    if (selectedCard && t.cardProfileId !== selectedCard) return false;
+    if (selectedStatement && t.statementId !== selectedStatement) return false;
+    if (showYearFilter && selectedYear && !t.transDate.startsWith(selectedYear)) return false;
+    return true;
+  }).reduce((sum, t) => sum + t.amount, 0);
+  const netTotalSpending = totalSpending - totalCredits;
+
   // Pie data — use parent-grouped totals; show top spenders as individual slices, merge the tail
   const groupedForPie = buildGroupedCategories(byCategory);
   const sortedPieGroups = [...groupedForPie].sort((a, b) => b.total - a.total);
 
-  // Compute per-category reimbursed amounts for pie
+  // Compute per-category reimbursed amounts for pie (reimbursed + credits)
   const pieReimbByCategory = new Map<string, number>();
   for (const t of filteredCardTxns) {
     if (selectedStatement && t.statementId !== selectedStatement) continue;
@@ -258,6 +269,14 @@ export function Dashboard({
     if (reimbAmt > 0) {
       pieReimbByCategory.set(t.category, (pieReimbByCategory.get(t.category) || 0) + reimbAmt);
     }
+  }
+  for (const t of allTransactions) {
+    if (!t.isCredit || t.category === 'Payment') continue;
+    if (cardholder && t.cardholder !== cardholder) continue;
+    if (selectedCard && t.cardProfileId !== selectedCard) continue;
+    if (selectedStatement && t.statementId !== selectedStatement) continue;
+    if (showYearFilter && selectedYear && !t.transDate.startsWith(selectedYear)) continue;
+    pieReimbByCategory.set(t.category, (pieReimbByCategory.get(t.category) || 0) + t.amount);
   }
 
   const mainSlices: { id: string; label: string; value: number; color: string; reimbPct: number }[] = [];
@@ -374,15 +393,27 @@ export function Dashboard({
       })
     : sortedStmts;
 
+  /** Match credits for the same card/cardholder/year scope (excluding Payment credits). */
+  const creditMatchesCardScope = (t: TransactionDoc) => {
+    if (!t.isCredit || t.category === 'Payment') return false;
+    if (cardholder && t.cardholder !== cardholder) return false;
+    if (selectedCard && t.cardProfileId !== selectedCard) return false;
+    if (showYearFilter && selectedYear && !t.transDate.startsWith(selectedYear)) return false;
+    return true;
+  };
+
   const stmtTotals = chartStmts.map((s) => {
-    const total = allTransactions
+    const charges = allTransactions
       .filter((t) => t.statementId === s.id && txnMatchesCardScope(t))
+      .reduce((sum, t) => sum + t.amount, 0);
+    const credits = allTransactions
+      .filter((t) => t.statementId === s.id && creditMatchesCardScope(t))
       .reduce((sum, t) => sum + t.amount, 0);
     return {
       id: s.id,
       label: offsetStatementLabel(s.statementDate, statementMonthOffset),
       statementDate: s.statementDate,
-      total: Math.round(total * 100) / 100,
+      total: Math.round((charges - credits) * 100) / 100,
     };
   });
 
@@ -444,7 +475,7 @@ export function Dashboard({
       ? focusTotal / focusPeriodDays
       : 0
     : chartStmts.length > 0
-      ? totalSpending / allStatementsSpanDays
+      ? netTotalSpending / allStatementsSpanDays
       : 0;
 
   const dailySpending = selectedStatement
@@ -652,7 +683,7 @@ export function Dashboard({
                   ? focusIdx >= 0
                     ? fmtMoney(focusTotal)
                     : '$0.00'
-                  : fmtMoney(totalSpending)
+                  : fmtMoney(netTotalSpending)
               }
               change={
                 // Hide trend when viewing all cards with multiple cards (cross-card comparison is misleading)
@@ -701,13 +732,17 @@ export function Dashboard({
                 .filter((s) => offsetStatementLabel(s.statementDate, statementMonthOffset) === selectedMonthLabel)
                 .map((s) => s.id)
             );
-            const allCardsMonthlySpending = allTransactions
+            const allCardsMonthlyCharges = allTransactions
               .filter((t) => !t.isCredit && sameMonthStmtIds.has(t.statementId))
               .reduce((sum, t) => {
                 if (t.reimbursed) return sum; // fully reimbursed — don't count
                 if (t.partialPayAmount != null && t.partialPayAmount > 0) return sum + t.partialPayAmount;
                 return sum + t.amount;
               }, 0);
+            const allCardsMonthlyCredits = allTransactions
+              .filter((t) => t.isCredit && t.category !== 'Payment' && sameMonthStmtIds.has(t.statementId))
+              .reduce((sum, t) => sum + t.amount, 0);
+            const allCardsMonthlySpending = allCardsMonthlyCharges - allCardsMonthlyCredits;
             const cardPortion = selectedMonthLabel ? allCardsMonthlySpending : (focusIdx >= 0 ? focusTotal : 0);
             const totalMonthly = cardPortion + fixedMonthly;
             const totalIncome = incomeSources.reduce((sum, s) => sum + s.amount, 0);
@@ -743,7 +778,7 @@ export function Dashboard({
                   subtitle={sameMonthStmtIds.size > 1 ? 'All cards + fixed expenses' : 'Cards + fixed expenses'}
                 />
                 <SparkCard
-                  label="Refunds"
+                  label="Refunds & reimbursements"
                   value={totalRefunds > 0 ? `-${fmtMoney(totalRefunds)}` : '$0.00'}
                   valueColor={totalRefunds > 0 ? 'var(--green)' : undefined}
                   subtitle={reimbursedAmount > 0 ? `${fmtMoney(reimbursedAmount)} reimbursed` : undefined}
@@ -977,8 +1012,7 @@ export function Dashboard({
             <div className="category-bars">
               {(() => {
                 const grouped = buildGroupedCategories(byCategory);
-                const maxTotal = grouped.length > 0 ? grouped[0].total : 1;
-                // Compute per-category reimbursed amounts (fully reimbursed + partial pay difference)
+                // Compute per-category reimbursed amounts (fully reimbursed + partial pay difference + credits)
                 const reimbursedByCategory = new Map<string, number>();
                 for (const t of filteredCardTxns) {
                   if (selectedStatement && t.statementId !== selectedStatement) continue;
@@ -989,6 +1023,31 @@ export function Dashboard({
                     reimbursedByCategory.set(t.category, (reimbursedByCategory.get(t.category) || 0) + reimbAmt);
                   }
                 }
+                // Also include credit transactions (refunds) in the hatched portion
+                for (const t of allTransactions) {
+                  if (!t.isCredit || t.category === 'Payment') continue;
+                  if (cardholder && t.cardholder !== cardholder) continue;
+                  if (selectedCard && t.cardProfileId !== selectedCard) continue;
+                  if (selectedStatement && t.statementId !== selectedStatement) continue;
+                  if (showYearFilter && selectedYear && !t.transDate.startsWith(selectedYear)) continue;
+                  reimbursedByCategory.set(t.category, (reimbursedByCategory.get(t.category) || 0) + t.amount);
+                }
+                // Sort by net amount (total minus reimbursements/refunds)
+                const getGroupReimb = (g: GroupedCategory) =>
+                  g.isParent && g.children
+                    ? g.children.reduce((sum, c) => sum + (reimbursedByCategory.get(c.category) || 0), 0)
+                    : reimbursedByCategory.get(g.name) || 0;
+                grouped.sort((a, b) => (b.total - getGroupReimb(b)) - (a.total - getGroupReimb(a)));
+                // Also sort children within parent groups by net amount
+                for (const g of grouped) {
+                  if (g.isParent && g.children) {
+                    g.children.sort((a, b) =>
+                      (b.total - (reimbursedByCategory.get(b.category) || 0)) -
+                      (a.total - (reimbursedByCategory.get(a.category) || 0))
+                    );
+                  }
+                }
+                const maxTotal = grouped.length > 0 ? grouped[0].total : 1;
                 return grouped.map((group) => {
                   const pct = (group.total / totalSpending) * 100;
                   const isExpanded = expandedGroups.has(group.name);
@@ -1005,11 +1064,18 @@ export function Dashboard({
                         <div className="category-bar-track">
                           <div className="category-bar-fill" style={{ width: `${(group.total / maxTotal) * 100}%`, background: group.color }}>
                             {reimbPct > 0 && (
-                              <div className="category-bar-reimb" style={{ width: `${reimbPct}%` }} title={`${fmtMoney(reimb)} reimbursed`} />
+                              <div className="category-bar-reimb" style={{ width: `${reimbPct}%` }} title={`${fmtMoney(reimb)} refunded/reimbursed`} />
                             )}
                           </div>
                         </div>
-                        <div className="category-bar-amount">{fmtMoney(group.total)}</div>
+                        <div className="category-bar-amount">
+                          {reimb > 0 ? (
+                            <span className="category-bar-amount-reimb">
+                              <span className="category-bar-amount-original">{fmtMoney(group.total)}</span>
+                              <span className="category-bar-amount-net">{fmtMoney(group.total - reimb)}</span>
+                            </span>
+                          ) : fmtMoney(group.total)}
+                        </div>
                         <div className="category-bar-pct">{pct.toFixed(1)}%</div>
                         <div className="category-bar-count">{group.count} txn{group.count !== 1 ? 's' : ''}</div>
                       </div>
@@ -1046,7 +1112,14 @@ export function Dashboard({
                             )}
                           </div>
                         </div>
-                        <div className="category-bar-amount">{fmtMoney(group.total)}</div>
+                        <div className="category-bar-amount">
+                          {groupReimb > 0 ? (
+                            <span className="category-bar-amount-reimb">
+                              <span className="category-bar-amount-original">{fmtMoney(group.total)}</span>
+                              <span className="category-bar-amount-net">{fmtMoney(group.total - groupReimb)}</span>
+                            </span>
+                          ) : fmtMoney(group.total)}
+                        </div>
                         <div className="category-bar-pct">{pct.toFixed(1)}%</div>
                         <div className="category-bar-count">{group.count} txn{group.count !== 1 ? 's' : ''}</div>
                       </div>
@@ -1074,7 +1147,14 @@ export function Dashboard({
                                     )}
                                   </div>
                                 </div>
-                                <div className="category-bar-amount">{fmtMoney(child.total)}</div>
+                                <div className="category-bar-amount">
+                                  {childReimb > 0 ? (
+                                    <span className="category-bar-amount-reimb">
+                                      <span className="category-bar-amount-original">{fmtMoney(child.total)}</span>
+                                      <span className="category-bar-amount-net">{fmtMoney(child.total - childReimb)}</span>
+                                    </span>
+                                  ) : fmtMoney(child.total)}
+                                </div>
                                 <div className="category-bar-pct">{childPct.toFixed(1)}%</div>
                                 <div className="category-bar-count">{child.count} txn{child.count !== 1 ? 's' : ''}</div>
                               </div>
