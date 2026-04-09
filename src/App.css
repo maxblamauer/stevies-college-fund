@@ -1676,21 +1676,42 @@ tr:hover {
   }
 
   /* Mobile: stacked rows instead of grid */
-  .monthly-summary-grid,
-  .monthly-summary-grid--4 {
+  .monthly-summary-grid {
     grid-template-columns: 1fr;
     gap: 0;
     padding: 0;
   }
 
+  .monthly-summary-grid--4 {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    padding: 0;
+  }
+
   .monthly-summary-compact {
+    margin-bottom: 12px;
+  }
+
+  .monthly-summary-grid--4 .monthly-summary-cell {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 10px 12px;
+    gap: 3px;
+    border-left: 3px solid var(--cell-accent, #7b6fc4);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--cell-accent, #7b6fc4);
+  }
+
+  .monthly-summary-grid:not(.monthly-summary-grid--4) .monthly-summary-compact {
     background: var(--bg-card);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     overflow: hidden;
   }
 
-  .monthly-summary-cell {
+  .monthly-summary-grid:not(.monthly-summary-grid--4) .monthly-summary-cell {
     flex-direction: row;
     flex-wrap: wrap;
     justify-content: space-between;
@@ -1707,15 +1728,15 @@ tr:hover {
   .monthly-summary-cell:hover {
     transform: none;
     box-shadow: none;
-    background: var(--bg-hover);
   }
 
-  .monthly-summary-cell:not(:first-child) {
+  .monthly-summary-grid:not(.monthly-summary-grid--4) .monthly-summary-cell:not(:first-child) {
     border-top: 1px solid var(--border);
   }
 
   .monthly-summary-grid--4 .monthly-summary-value {
-    font-size: 15px;
+    font-size: 16px;
+    font-weight: 700;
   }
 
   .monthly-summary-value {

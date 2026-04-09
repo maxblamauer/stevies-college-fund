@@ -766,7 +766,6 @@ export function Dashboard({
               const totalRefunds = creditAmount + reimbursedAmount;
               const surplus = totalIncome - totalMonthly + totalRefunds;
 
-              const activeFixedCount = fixedExpenses.filter((e) => !e.endDate || e.endDate >= new Date().toISOString().slice(0, 10)).length;
               monthlyRows = [];
               if (incomeSources.length > 0) {
                 monthlyRows.push({ label: 'Monthly income', value: fmtMoney(totalIncome), detail: 'Surplus: ', detailHighlight: `${surplus < 0 ? '-' : ''}${fmtMoney(Math.abs(surplus))}`, detailHighlightColor: surplus >= 0 ? 'var(--green)' : 'var(--red)', valueColor: undefined });
