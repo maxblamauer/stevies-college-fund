@@ -23,6 +23,13 @@ interface Props {
   onBlurAmountsChange: (value: boolean) => void;
   statementMonthOffset: number;
   onStatementMonthOffsetChange: (value: number) => void;
+  householdName: string;
+  inviteCode: string;
+  theme: 'light' | 'dark';
+  onThemeChange: (theme: 'light' | 'dark') => void;
+  onLogout: () => void;
+  onDeleteAccount: () => void;
+  userName: string;
 }
 
 interface GenerateResult {
@@ -39,7 +46,7 @@ interface GenerateResult {
 
 type AddCardStep = 'idle' | 'label' | 'upload' | 'processing' | 'done';
 
-export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange, statementMonthOffset, onStatementMonthOffsetChange }: Props) {
+export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange, statementMonthOffset, onStatementMonthOffsetChange, householdName, inviteCode, theme, onThemeChange, onLogout, onDeleteAccount, userName }: Props) {
   const [mappings, setMappings] = useState<Mapping[]>([]);
   const [cardProfiles, setCardProfiles] = useState<(CardProfile & { id: string })[]>([]);
   const [addCardStep, setAddCardStep] = useState<AddCardStep>('idle');
@@ -577,40 +584,65 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange,
     }
   };
 
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [memberCount, setMemberCount] = useState(0);
+
+  // Fetch member count when delete modal opens
+  useEffect(() => {
+    if (!showDeleteConfirm || !householdId) return;
+    getDocs(collection(db, 'households', householdId, 'members')).then((snap) => {
+      setMemberCount(snap.size);
+    });
+  }, [showDeleteConfirm, householdId]);
+
   return (
     <div className="mappings-page">
       {/* Display Section */}
-      <h2>Display</h2>
+      <h2 className="mappings-page-section-title">Display</h2>
       <p className="hint">Appearance and display preferences.</p>
-      <div className="settings-card">
-        <div className="settings-card-row">
-          <div className="settings-card-row-info">
-            <span className="settings-card-row-title">Blur amounts</span>
-            <span className="settings-card-row-desc">Hide dollar values throughout the app for privacy</span>
-          </div>
-          <label className="fixed-expense-toggle">
-            <input
-              type="checkbox"
-              checked={blurAmounts}
-              onChange={(e) => onBlurAmountsChange(e.target.checked)}
-            />
-            <span className="fixed-expense-toggle-track" />
-          </label>
-        </div>
-        <div className="settings-card-row">
-          <div className="settings-card-row-info">
-            <span className="settings-card-row-title">Statement month offset</span>
-            <span className="settings-card-row-desc">Show statement as the prior month's spending (e.g. Apr statement = March)</span>
-          </div>
-          <label className="fixed-expense-toggle">
-            <input
-              type="checkbox"
-              checked={statementMonthOffset !== 0}
-              onChange={(e) => onStatementMonthOffsetChange(e.target.checked ? -1 : 0)}
-            />
-            <span className="fixed-expense-toggle-track" />
-          </label>
-        </div>
+      <div className="table-wrapper">
+        <table className="transactions-table fixed-expenses-table">
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>Description</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="mapping-cell-primary"><strong>Dark mode</strong></td>
+              <td className="mapping-cell-meta">Switch between light and dark theme</td>
+              <td className="mapping-cell-actions">
+                <label className="fixed-expense-toggle">
+                  <input type="checkbox" checked={theme === 'dark'} onChange={(e) => onThemeChange(e.target.checked ? 'dark' : 'light')} />
+                  <span className="fixed-expense-toggle-track" />
+                </label>
+              </td>
+            </tr>
+            <tr>
+              <td className="mapping-cell-primary"><strong>Blur amounts</strong></td>
+              <td className="mapping-cell-meta">Hide dollar values throughout the app for privacy</td>
+              <td className="mapping-cell-actions">
+                <label className="fixed-expense-toggle">
+                  <input type="checkbox" checked={blurAmounts} onChange={(e) => onBlurAmountsChange(e.target.checked)} />
+                  <span className="fixed-expense-toggle-track" />
+                </label>
+              </td>
+            </tr>
+            <tr>
+              <td className="mapping-cell-primary"><strong>Statement month offset</strong></td>
+              <td className="mapping-cell-meta">Show statement as the prior month's spending (e.g. Apr statement = March)</td>
+              <td className="mapping-cell-actions">
+                <label className="fixed-expense-toggle">
+                  <input type="checkbox" checked={statementMonthOffset !== 0} onChange={(e) => onStatementMonthOffsetChange(e.target.checked ? -1 : 0)} />
+                  <span className="fixed-expense-toggle-track" />
+                </label>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
 
       {/* Card Profiles Section */}
@@ -1258,6 +1290,105 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange,
           <p className="login-error household-inline-error edit-card-panel-error">{editMappingError}</p>
         )}
       </Modal>
+
+      {/* Account Section */}
+      <h2 className="mappings-page-section-title">Account</h2>
+      <p className="hint">Signed in as {userName}.</p>
+
+      <div className="table-wrapper">
+        <table className="transactions-table fixed-expenses-table">
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th>Value</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td className="mapping-cell-primary"><strong>Household</strong></td>
+              <td className="mapping-cell-meta">{householdName}</td>
+              <td className="mapping-cell-actions"></td>
+            </tr>
+            {inviteCode && (
+              <tr>
+                <td className="mapping-cell-primary"><strong>Invite code</strong></td>
+                <td className="mapping-cell-meta">{inviteCode}</td>
+                <td className="mapping-cell-actions">
+                  <button
+                    type="button"
+                    className="btn btn-xs"
+                    onClick={() => {
+                      navigator.clipboard.writeText(inviteCode);
+                      setCodeCopied(true);
+                      setTimeout(() => setCodeCopied(false), 2500);
+                    }}
+                  >
+                    Copy
+                  </button>
+                </td>
+              </tr>
+            )}
+            <tr>
+              <td className="mapping-cell-primary"><strong>Sign out</strong></td>
+              <td className="mapping-cell-meta"></td>
+              <td className="mapping-cell-actions">
+                <button type="button" className="btn btn-xs" onClick={onLogout}>
+                  Sign out
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {/* Delete Account — always at the very bottom */}
+      <div className="danger-card">
+        <h3 className="danger-card-title">Delete Account</h3>
+        <p className="danger-card-desc">
+          Permanently remove your account and all of its data. This action is not reversible, so please continue with caution.
+        </p>
+        <div className="danger-card-actions">
+          <button type="button" className="btn btn-xs btn-destructive" onClick={() => setShowDeleteConfirm(true)}>
+            Delete Account
+          </button>
+        </div>
+      </div>
+
+      <Modal
+        open={showDeleteConfirm}
+        onClose={() => setShowDeleteConfirm(false)}
+        title="Delete account"
+        description="This action cannot be undone. All your data will be permanently deleted."
+      >
+        <ModalBodyPanel>
+          <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--text-muted)' }}>
+            Are you sure you want to delete your account? This will permanently remove all your household data, statements, transactions, and settings.
+          </p>
+          {memberCount > 1 && (
+            <p style={{ margin: '0 0 16px', fontSize: 14, color: 'var(--red)', fontWeight: 600 }}>
+              Warning: Your household has {memberCount} members. Deleting will remove all shared data for everyone in the household.
+            </p>
+          )}
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-xs" onClick={() => setShowDeleteConfirm(false)}>
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="btn btn-xs btn-destructive"
+              onClick={() => {
+                setShowDeleteConfirm(false);
+                onDeleteAccount();
+              }}
+            >
+              Delete account
+            </button>
+          </div>
+        </ModalBodyPanel>
+      </Modal>
+
+      {codeCopied && <div className="toast">Invite code copied to clipboard</div>}
     </div>
   );
 }

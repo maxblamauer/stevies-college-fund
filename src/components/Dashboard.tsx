@@ -520,11 +520,20 @@ export function Dashboard({
     },
   };
 
-  // For bar chart x-axis: show every Nth label if there are too many
-  const barTickInterval = dailySpending.length > 20 ? 3 : dailySpending.length > 10 ? 2 : 1;
-  const barTickValues = dailySpending
-    .map((d, i) => (i % barTickInterval === 0 ? d.transDate.slice(5) : null))
-    .filter(Boolean) as string[];
+  // For bar chart x-axis: show every Nth label if there are too many.
+  const isMobile = typeof window !== 'undefined' && window.innerWidth <= 640;
+  const barTickValues: string[] = (() => {
+    if (dailySpending.length === 0) return [];
+    const allLabels = dailySpending.map((d) => d.transDate.slice(5));
+    if (isMobile) {
+      // Mobile: show only first, middle, and last dates
+      if (allLabels.length <= 3) return allLabels;
+      return [allLabels[0], allLabels[Math.floor(allLabels.length / 2)], allLabels[allLabels.length - 1]];
+    }
+    // Desktop: show every label, or every 2nd/3rd if crowded
+    const interval = allLabels.length > 20 ? 3 : allLabels.length > 10 ? 2 : 1;
+    return allLabels.filter((_, i) => i % interval === 0);
+  })();
 
   useEffect(() => {
     if (!onStevieMood) return;
@@ -675,119 +684,127 @@ export function Dashboard({
         </div>
       ) : (
         <>
-          <div className="stats-summary">
-            <SparkCard
-              label={selectedStatement ? 'Statement period' : 'Total spending'}
-              value={
-                selectedStatement
-                  ? focusIdx >= 0
-                    ? fmtMoney(focusTotal)
-                    : '$0.00'
-                  : fmtMoney(totalSpending)
-              }
-              subtitle={focusTotalRefunds > 0 ? `Net spend: ${fmtMoney(focusNetSpend)}` : undefined}
-              subtitleColor={focusTotalRefunds > 0 ? 'var(--green)' : undefined}
-              change={
-                // Hide trend when viewing all cards with multiple cards (cross-card comparison is misleading)
-                showCardFilter && !selectedCard
-                  ? undefined
-                  : selectedStatement ? selectedSpendingChange : (stmtTotals.length > 1 ? spendingChange : undefined)
-              }
-              invertColor
-              stevieHighlight={stevieStatHighlight}
-            />
-            <SparkCard
-              label="Average"
-              value={fmtMoney(avgSpending)}
-              subtitle={`across ${chartStmts.length} statement${chartStmts.length !== 1 ? 's' : ''}`}
-            />
-            <SparkCard
-              label="Daily average"
-              value={
-                chartStmts.length > 0
+          {(() => {
+            const statsCells: { label: string; value: string; detail?: string; valueColor?: string }[] = [
+              {
+                label: selectedStatement ? 'Statement period' : 'Total spending',
+                value: selectedStatement
+                  ? focusIdx >= 0 ? fmtMoney(focusTotal) : '$0.00'
+                  : fmtMoney(totalSpending),
+                detail: focusTotalRefunds > 0 ? `Net spend: ${fmtMoney(focusNetSpend)}` : undefined,
+              },
+              {
+                label: 'Average',
+                value: fmtMoney(avgSpending),
+                detail: `across ${chartStmts.length} statement${chartStmts.length !== 1 ? 's' : ''}`,
+              },
+              {
+                label: 'Daily average',
+                value: chartStmts.length > 0
                   ? fmtMoney(Math.round(dailyAverageInPeriod * 100) / 100)
-                  : '$0.00'
-              }
-              subtitle={
-                selectedStatement && focusStmt
+                  : '$0.00',
+                detail: selectedStatement && focusStmt
                   ? `${focusPeriodDays} day${focusPeriodDays !== 1 ? 's' : ''} in period`
                   : chartStmts.length > 0
                     ? `${allStatementsSpanDays} day${allStatementsSpanDays !== 1 ? 's' : ''} across all statements`
-                    : undefined
-              }
-            />
-            <SparkCard
-              label="Top category"
-              value={groupedForPie.length > 0 ? groupedForPie[0].name : '--'}
-              subtitle={groupedForPie.length > 0 ? fmtMoney(groupedForPie[0].total) : undefined}
-            />
-          </div>
-          {selectedStatement && fixedExpenses.length > 0 && (() => {
-            const fixedMonthly = monthlyFixedTotal(fixedExpenses);
-            // Include spending from other cards in the same month
-            const selectedStmtInfo = focusStmt;
-            const selectedMonthLabel = selectedStmtInfo
-              ? offsetStatementLabel(selectedStmtInfo.statementDate, statementMonthOffset)
-              : '';
-            const sameMonthStmtIds = new Set(
-              statements
-                .filter((s) => offsetStatementLabel(s.statementDate, statementMonthOffset) === selectedMonthLabel)
-                .map((s) => s.id)
-            );
-            const allCardsMonthlySpending = allTransactions
-              .filter((t) => !t.isCredit && sameMonthStmtIds.has(t.statementId))
-              .reduce((sum, t) => sum + t.amount, 0);
-            const cardPortion = selectedMonthLabel ? allCardsMonthlySpending : (focusIdx >= 0 ? focusTotal : 0);
-            const totalMonthly = cardPortion + fixedMonthly;
-            const totalIncome = incomeSources.reduce((sum, s) => sum + s.amount, 0);
-            const reimbursedAmount = allTransactions
-              .filter((t) => !t.isCredit && sameMonthStmtIds.has(t.statementId) && (t.reimbursed || (t.partialPayAmount != null && t.partialPayAmount > 0)))
-              .reduce((sum, t) => {
-                if (t.reimbursed) return sum + t.amount;
-                return sum + (t.amount - t.partialPayAmount!);
-              }, 0);
-            const creditAmount = allTransactions
-              .filter((t) => t.isCredit && t.category !== 'Payment' && sameMonthStmtIds.has(t.statementId))
-              .reduce((sum, t) => sum + t.amount, 0);
-            const totalRefunds = creditAmount + reimbursedAmount;
-            const surplus = totalIncome - totalMonthly + totalRefunds;
+                    : undefined,
+              },
+              {
+                label: 'Top category',
+                value: groupedForPie.length > 0 ? groupedForPie[0].name : '--',
+                detail: groupedForPie.length > 0 ? fmtMoney(groupedForPie[0].total) : undefined,
+              },
+            ];
 
+            // Add change % to first cell
+            const changeVal = showCardFilter && !selectedCard
+              ? undefined
+              : selectedStatement ? selectedSpendingChange : (stmtTotals.length > 1 ? spendingChange : undefined);
+
+            // Build monthly rows if applicable
+            let monthlyRows: { label: string; value: string; valueColor?: string; detail?: string }[] | null = null;
+            if (selectedStatement && fixedExpenses.length > 0) {
+              const fixedMonthly = monthlyFixedTotal(fixedExpenses);
+              const selectedStmtInfo = focusStmt;
+              const selectedMonthLabel = selectedStmtInfo
+                ? offsetStatementLabel(selectedStmtInfo.statementDate, statementMonthOffset)
+                : '';
+              const sameMonthStmtIds = new Set(
+                statements
+                  .filter((s) => offsetStatementLabel(s.statementDate, statementMonthOffset) === selectedMonthLabel)
+                  .map((s) => s.id)
+              );
+              const allCardsMonthlySpending = allTransactions
+                .filter((t) => !t.isCredit && sameMonthStmtIds.has(t.statementId))
+                .reduce((sum, t) => sum + t.amount, 0);
+              const cardPortion = selectedMonthLabel ? allCardsMonthlySpending : (focusIdx >= 0 ? focusTotal : 0);
+              const totalMonthly = cardPortion + fixedMonthly;
+              const totalIncome = incomeSources.reduce((sum, s) => sum + s.amount, 0);
+              const reimbursedAmount = allTransactions
+                .filter((t) => !t.isCredit && sameMonthStmtIds.has(t.statementId) && (t.reimbursed || (t.partialPayAmount != null && t.partialPayAmount > 0)))
+                .reduce((sum, t) => {
+                  if (t.reimbursed) return sum + t.amount;
+                  return sum + (t.amount - t.partialPayAmount!);
+                }, 0);
+              const creditAmount = allTransactions
+                .filter((t) => t.isCredit && t.category !== 'Payment' && sameMonthStmtIds.has(t.statementId))
+                .reduce((sum, t) => sum + t.amount, 0);
+              const totalRefunds = creditAmount + reimbursedAmount;
+              const surplus = totalIncome - totalMonthly + totalRefunds;
+
+              monthlyRows = [];
+              if (incomeSources.length > 0) {
+                monthlyRows.push({ label: 'Monthly income', value: fmtMoney(totalIncome), detail: incomeSources.map((s) => s.person).join(' + ') });
+              }
+              monthlyRows.push({
+                label: 'Fixed expenses',
+                value: fmtMoney(fixedMonthly),
+                detail: `${fixedExpenses.filter((e) => !e.endDate || e.endDate >= new Date().toISOString().slice(0, 10)).length} recurring`,
+              });
+              monthlyRows.push({
+                label: 'Total spending',
+                value: fmtMoney(totalMonthly),
+                detail: sameMonthStmtIds.size > 1 ? 'All cards + fixed' : 'Cards + fixed',
+              });
+              monthlyRows.push({
+                label: 'Refunds',
+                value: totalRefunds > 0 ? `-${fmtMoney(totalRefunds)}` : '$0.00',
+                valueColor: totalRefunds > 0 ? 'var(--green)' : undefined,
+              });
+              if (incomeSources.length > 0) {
+                monthlyRows.push({
+                  label: 'Surplus',
+                  value: fmtMoney(Math.abs(surplus)),
+                  valueColor: surplus >= 0 ? 'var(--green)' : 'var(--red)',
+                  detail: surplus < 0 ? 'Over budget' : undefined,
+                });
+              }
+            }
 
             return (
-              <div className="stats-summary stats-summary--5">
-                {incomeSources.length > 0 && (
-                  <SparkCard
-                    label="Monthly income"
-                    value={fmtMoney(totalIncome)}
-                    subtitle={incomeSources.map((s) => s.person).join(' + ')}
-                  />
-                )}
-                <SparkCard
-                  label="Fixed monthly expenses"
-                  value={fmtMoney(fixedMonthly)}
-                  subtitle={`${fixedExpenses.filter((e) => !e.endDate || e.endDate >= new Date().toISOString().slice(0, 10)).length} recurring`}
-                />
-                <SparkCard
-                  label="Total spending"
-                  value={fmtMoney(totalMonthly)}
-                  subtitle={sameMonthStmtIds.size > 1 ? 'All cards + fixed' : 'Cards + fixed'}
-                />
-                <SparkCard
-                  label="Refunds & reimbursements"
-                  value={totalRefunds > 0 ? `-${fmtMoney(totalRefunds)}` : '$0.00'}
-                  valueColor={totalRefunds > 0 ? 'var(--green)' : undefined}
-                  subtitle={reimbursedAmount > 0 ? `${fmtMoney(reimbursedAmount)} reimbursed` : undefined}
-                />
-                {incomeSources.length > 0 && (
-                  <SparkCard
-                    label="Monthly surplus"
-                    value={fmtMoney(Math.abs(surplus))}
-                    valueColor={surplus >= 0 ? 'var(--green)' : 'var(--red)'}
-                    subtitle={surplus >= 0
-                      ? sameMonthStmtIds.size > 1 ? 'All cards combined' : 'Left over after spending'
-                      : sameMonthStmtIds.size > 1 ? 'Over budget · all cards' : 'Over budget'
-                    }
-                  />
+              <div className="monthly-summary-compact">
+                <h4 className="monthly-summary-compact-title">Statement Summary</h4>
+                <div className="monthly-summary-grid monthly-summary-grid--4">
+                  {statsCells.map((c) => (
+                    <div key={c.label} className="monthly-summary-cell">
+                      <span className="monthly-summary-label">{c.label}</span>
+                      <span className="monthly-summary-value" style={c.valueColor ? { color: c.valueColor } : undefined}>{c.value}</span>
+                      {c.detail && <span className="monthly-summary-detail">{c.detail}</span>}
+                    </div>
+                  ))}
+                </div>
+                {monthlyRows && (
+                  <>
+                    <div className="monthly-summary-grid monthly-summary-grid--sub">
+                      {monthlyRows.map((r) => (
+                        <div key={r.label} className="monthly-summary-cell">
+                          <span className="monthly-summary-label">{r.label}</span>
+                          <span className="monthly-summary-value" style={r.valueColor ? { color: r.valueColor } : undefined}>{r.value}</span>
+                          {r.detail && <span className="monthly-summary-detail">{r.detail}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </>
                 )}
               </div>
             );
@@ -932,7 +949,7 @@ export function Dashboard({
                     }))}
                     keys={['amount']}
                     indexBy="day"
-                    margin={{ top: 10, right: 10, bottom: 40, left: 55 }}
+                    margin={{ top: 10, right: 10, bottom: isMobile ? 48 : 40, left: isMobile ? 48 : 55 }}
                     padding={0.35}
                     colors={[isDark ? '#8b7fd4' : '#7b6fc4']}
                     theme={nivoTheme}
@@ -940,7 +957,7 @@ export function Dashboard({
                     axisBottom={{
                       tickSize: 0,
                       tickPadding: 6,
-                      tickRotation: 0,
+                      tickRotation: isMobile ? -35 : 0,
                       tickValues: barTickValues,
                     }}
                     enableGridX={false}

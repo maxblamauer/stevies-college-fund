@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import type { User } from 'firebase/auth';
-import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, deleteDoc, collection, getDocs, writeBatch } from 'firebase/firestore';
 import { auth, db } from './firebase';
 import { useTheme } from './ThemeContext';
 import { Upload } from './components/Upload';
@@ -26,8 +26,6 @@ function App() {
   const [householdName, setHouseholdName] = useState('');
   const [inviteCode, setInviteCode] = useState('');
   const [householdLoading, setHouseholdLoading] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [codeCopied, setCodeCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [refreshKey, setRefreshKey] = useState(0);
   const [categoryFilter, setCategoryFilter] = useState('');
@@ -58,7 +56,6 @@ function App() {
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       const uid = firebaseUser?.uid ?? null;
       if (authUidRef.current !== uid) {
-        setMenuOpen(false);
         authUidRef.current = uid;
       }
       setUser(firebaseUser);
@@ -140,6 +137,49 @@ function App() {
     await signOut(auth);
   };
 
+  const handleDeleteAccount = async () => {
+    try {
+      const currentUser = auth.currentUser;
+      if (!currentUser) return;
+
+      // Delete all Firestore data
+      if (householdId) {
+        const subcollections = ['transactions', 'statements', 'categoryMappings', 'cardProfiles', 'fixedExpenses', 'incomeSources', 'members'];
+        for (const sub of subcollections) {
+          const snap = await getDocs(collection(db, 'households', householdId, sub));
+          // Batch delete in groups of 500 (Firestore limit)
+          let batch = writeBatch(db);
+          let count = 0;
+          for (const d of snap.docs) {
+            batch.delete(d.ref);
+            count++;
+            if (count >= 500) {
+              await batch.commit();
+              batch = writeBatch(db);
+              count = 0;
+            }
+          }
+          if (count > 0) await batch.commit();
+        }
+        // Delete the household document
+        await deleteDoc(doc(db, 'households', householdId));
+      }
+
+      // Delete the user document
+      await deleteDoc(doc(db, 'users', currentUser.uid));
+
+      // Delete the Firebase Auth user (must be last)
+      await currentUser.delete();
+    } catch (err: any) {
+      if (err?.code === 'auth/requires-recent-login') {
+        alert('For security, please sign out and sign back in first, then try deleting again.');
+      } else {
+        alert('Failed to delete account. Please try again.');
+        console.error('Delete account error:', err);
+      }
+    }
+  };
+
   const stevieStatHighlight: 'good' | 'bad' | null = null;
 
   if (authLoading) {
@@ -204,86 +244,6 @@ function App() {
             </button>
           ))}
         </nav>
-        <div className="header-right">
-          <div className="user-menu-wrapper">
-            <button className="user-menu-btn" onClick={() => setMenuOpen(!menuOpen)}>
-              {user.displayName?.split(' ')[0] || 'Menu'}
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="6 9 12 15 18 9" />
-              </svg>
-            </button>
-            {menuOpen && (
-              <>
-                <div className="user-menu-backdrop" onClick={() => setMenuOpen(false)} />
-                <div className="user-menu">
-                  <div className="user-menu-header">
-                    <div className="user-menu-household-row">
-                      <span className="user-menu-item-icon" aria-hidden>
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M4 11 12 5l8 6v9H4V11z" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-household-name">{householdName}</span>
-                    </div>
-                  </div>
-                  {inviteCode && (
-                    <button
-                      className="user-menu-item user-menu-action"
-                      onClick={() => {
-                        navigator.clipboard.writeText(inviteCode);
-                        setCodeCopied(true);
-                        setTimeout(() => setCodeCopied(false), 2000);
-                      }}
-                    >
-                      <span className="user-menu-item-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="8" y="8" width="12" height="12" rx="1" />
-                          <path d="M5 15V6a1 1 0 0 1 1-1h9" />
-                        </svg>
-                      </span>
-                      <span className="user-menu-item-label">
-                        Invite code: <span className="invite-code-inline">{inviteCode}</span>
-                      </span>
-                      <span className="invite-code-hint">{codeCopied ? 'Copied!' : ''}</span>
-                    </button>
-                  )}
-                  <div className="user-menu-divider" />
-                  <button
-                    className="user-menu-item user-menu-action"
-                    onClick={() => {
-                      setTheme(theme === 'dark' ? 'light' : 'dark');
-                      setMenuOpen(false);
-                    }}
-                  >
-                    <span className="user-menu-item-icon">
-                      {theme === 'dark' ? (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <circle cx="12" cy="12" r="3.5" />
-                          <path d="M12 4v2M12 18v2M4 12h2M18 12h2" />
-                        </svg>
-                      ) : (
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                          <path d="M18 9a7 7 0 1 1-9 9 6 6 0 1 0 9-9" />
-                        </svg>
-                      )}
-                    </span>
-                    <span className="user-menu-item-label">{theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}</span>
-                  </button>
-                  <button className="user-menu-item user-menu-action user-menu-danger" onClick={handleLogout}>
-                    <span className="user-menu-item-icon">
-                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M10 5v14" />
-                        <path d="M15 12h7" />
-                        <path d="m18 9 3 3-3 3" />
-                      </svg>
-                    </span>
-                    <span className="user-menu-item-label">Sign out</span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
       </header>
       <main className={`app-main${blurAmounts ? ' blur-amounts' : ''}`}>
         {activeTab === 'dashboard' && (
@@ -343,6 +303,13 @@ function App() {
             onBlurAmountsChange={toggleBlurAmounts}
             statementMonthOffset={statementMonthOffset}
             onStatementMonthOffsetChange={handleStatementMonthOffsetChange}
+            householdName={householdName}
+            inviteCode={inviteCode}
+            theme={theme}
+            onThemeChange={setTheme}
+            onLogout={handleLogout}
+            onDeleteAccount={handleDeleteAccount}
+            userName={user.displayName || 'User'}
           />
         )}
       </main>

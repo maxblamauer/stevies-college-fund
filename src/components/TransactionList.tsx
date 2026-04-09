@@ -501,37 +501,37 @@ export function TransactionList({
         />
       </div>
       <div className="transactions-toolbar">
-        <div className="stats-summary">
-          <SparkCard
-            label={primaryLabel}
-            value={fmtMoney(currentStatementSpending)}
-            subtitle={totalRefunds > 0 ? `Net spend: ${fmtMoney(currentStatementSpending - totalRefunds)}` : primarySubtitle}
-            subtitleColor={totalRefunds > 0 ? 'var(--green)' : undefined}
-          />
-          <SparkCard
-            label={previousLabel}
-            value={prevStatementSpending !== null ? fmtMoney(prevStatementSpending) : '$0.00'}
-            change={filter.statement && prevStatementSpending !== null ? trendPct : undefined}
-            invertColor
-            stevieHighlight={stevieStatHighlight}
-          />
-          <SparkCard
-            label="Avg charge"
-            value={chargeCount > 0 ? fmtMoney(avgCharge) : '$0.00'}
-            subtitle={chargeCount > 0 ? `Across ${chargeCount} charge${chargeCount !== 1 ? 's' : ''}` : 'No charges in view'}
-          />
-          <SparkCard
-            label="Refunds & reimbursements"
-            value={totalRefunds > 0 ? `-${fmtMoney(totalRefunds)}` : '$0.00'}
-            valueColor={totalRefunds > 0 ? 'var(--green)' : undefined}
-            subtitle={
-              totalRefunds > 0 && reimbursedAmount > 0
-                ? `${fmtMoney(reimbursedAmount)} reimbursed`
-                : filter.category || filter.cardholder || filter.card || filter.confirmed
-                  ? 'In filtered rows'
-                  : undefined
-            }
-          />
+        <div className="monthly-summary-compact">
+          <h4 className="monthly-summary-compact-title">Transaction Summary</h4>
+          <div className="monthly-summary-grid monthly-summary-grid--4">
+            <div className="monthly-summary-cell">
+              <span className="monthly-summary-label">{primaryLabel}</span>
+              <span className="monthly-summary-value">{fmtMoney(currentStatementSpending)}</span>
+              {totalRefunds > 0 && <span className="monthly-summary-detail" style={{ color: 'var(--green)' }}>Net spend: {fmtMoney(currentStatementSpending - totalRefunds)}</span>}
+              {!totalRefunds && primarySubtitle && <span className="monthly-summary-detail">{primarySubtitle}</span>}
+            </div>
+            <div className="monthly-summary-cell">
+              <span className="monthly-summary-label">{previousLabel}</span>
+              <span className="monthly-summary-value">{prevStatementSpending !== null ? fmtMoney(prevStatementSpending) : '$0.00'}</span>
+              {filter.statement && prevStatementSpending !== null && trendPct !== undefined && (
+                <span className="monthly-summary-detail" style={{ color: trendPct <= 0 ? 'var(--green)' : 'var(--red)' }}>
+                  {trendPct > 0 ? '+' : ''}{trendPct.toFixed(1)}%
+                </span>
+              )}
+            </div>
+            <div className="monthly-summary-cell">
+              <span className="monthly-summary-label">Avg charge</span>
+              <span className="monthly-summary-value">{chargeCount > 0 ? fmtMoney(avgCharge) : '$0.00'}</span>
+              <span className="monthly-summary-detail">{chargeCount > 0 ? `Across ${chargeCount} charge${chargeCount !== 1 ? 's' : ''}` : 'No charges in view'}</span>
+            </div>
+            <div className="monthly-summary-cell">
+              <span className="monthly-summary-label">Refunds & reimbursements</span>
+              <span className="monthly-summary-value" style={totalRefunds > 0 ? { color: 'var(--green)' } : undefined}>
+                {totalRefunds > 0 ? `-${fmtMoney(totalRefunds)}` : '$0.00'}
+              </span>
+              {totalRefunds > 0 && reimbursedAmount > 0 && <span className="monthly-summary-detail">{fmtMoney(reimbursedAmount)} reimbursed</span>}
+            </div>
+          </div>
         </div>
       </div>
 

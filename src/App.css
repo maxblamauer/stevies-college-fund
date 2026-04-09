@@ -54,9 +54,11 @@
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-feature-settings: 'cv01', 'cv02', 'ss01';
   background: var(--bg);
   color: var(--text);
-  line-height: 1.5;
+  line-height: 1.55;
+  letter-spacing: -0.006em;
   transition: background 0.2s, color 0.2s;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -1024,7 +1026,8 @@ tr:hover {
   width: auto;
 }
 
-.transactions-toolbar .stats-summary {
+.transactions-toolbar .stats-summary,
+.transactions-toolbar .monthly-summary-compact {
   margin-bottom: 0;
 }
 
@@ -1207,6 +1210,111 @@ tr:hover {
 
 /* Monthly stats row — uses default 4-col grid */
 
+/* Desktop monthly card grid — no longer used */
+.monthly-cards-desktop {
+  display: none;
+}
+
+/* Monthly summary */
+.monthly-summary-compact {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+
+.monthly-summary-compact-title {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin: 0;
+  padding: 14px 20px 10px;
+}
+
+.monthly-summary-compact-title--sub {
+  border-top: 1px solid var(--border);
+  padding-top: 16px;
+  margin-top: 2px;
+}
+
+.monthly-summary-grid--sub {
+  border-top: 1px solid var(--border);
+}
+
+.monthly-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  border-top: 1px solid var(--border);
+  gap: 0 12px;
+  padding: 8px 12px 12px;
+}
+
+.monthly-summary-grid--4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.monthly-summary-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 16px 20px 18px;
+  cursor: default;
+  border-left: 3px solid var(--cell-accent, #7b6fc4);
+  border-radius: 6px;
+  background: var(--cell-tint, transparent);
+  transition: transform 0.15s, box-shadow 0.15s, background 0.15s;
+}
+
+.monthly-summary-cell:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+/* Accent colors + subtle tints */
+.monthly-summary-grid--4 .monthly-summary-cell:nth-child(1) { --cell-accent: #7b6fc4; --cell-tint: rgba(123, 111, 196, 0.04); }
+.monthly-summary-grid--4 .monthly-summary-cell:nth-child(2) { --cell-accent: #6b9e78; --cell-tint: rgba(107, 158, 120, 0.04); }
+.monthly-summary-grid--4 .monthly-summary-cell:nth-child(3) { --cell-accent: #c4956b; --cell-tint: rgba(196, 149, 107, 0.04); }
+.monthly-summary-grid--4 .monthly-summary-cell:nth-child(4) { --cell-accent: #8b6b6b; --cell-tint: rgba(139, 107, 107, 0.04); }
+
+.monthly-summary-grid:not(.monthly-summary-grid--4) .monthly-summary-cell:nth-child(1) { --cell-accent: #7b6fc4; --cell-tint: rgba(123, 111, 196, 0.04); }
+.monthly-summary-grid:not(.monthly-summary-grid--4) .monthly-summary-cell:nth-child(2) { --cell-accent: #6b9e78; --cell-tint: rgba(107, 158, 120, 0.04); }
+.monthly-summary-grid:not(.monthly-summary-grid--4) .monthly-summary-cell:nth-child(3) { --cell-accent: #c4956b; --cell-tint: rgba(196, 149, 107, 0.04); }
+.monthly-summary-grid:not(.monthly-summary-grid--4) .monthly-summary-cell:nth-child(4) { --cell-accent: #8b6b6b; --cell-tint: rgba(139, 107, 107, 0.04); }
+.monthly-summary-grid:not(.monthly-summary-grid--4) .monthly-summary-cell:nth-child(5) { --cell-accent: #6b8b9e; --cell-tint: rgba(107, 139, 158, 0.04); }
+
+/* Top row (statement stats) gets slightly larger values */
+.monthly-summary-grid--4 .monthly-summary-value {
+  font-size: 22px;
+}
+
+.monthly-summary-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+
+.monthly-summary-detail {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.monthly-summary-value {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Blur amounts: monthly summary compact values */
+.blur-amounts .monthly-summary-value {
+  filter: blur(8px);
+  user-select: none;
+}
+
 @media (max-width: 960px) and (min-width: 641px) {
   .stats-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1216,6 +1324,35 @@ tr:hover {
   }
   .stats-summary--5 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .monthly-summary-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .monthly-summary-grid--4 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .monthly-summary-cell:not(:first-child) {
+    border-left: none;
+  }
+
+  .monthly-summary-cell:nth-child(n+3) {
+    border-top: 1px solid var(--border);
+  }
+
+  .monthly-summary-cell:nth-child(3n+2),
+  .monthly-summary-cell:nth-child(3n+3) {
+    border-left: 1px solid var(--border);
+  }
+
+  .monthly-summary-grid--4 .monthly-summary-cell:nth-child(n+3) {
+    border-top: 1px solid var(--border);
+  }
+
+  .monthly-summary-grid--4 .monthly-summary-cell:nth-child(even) {
+    border-left: 1px solid var(--border);
   }
 }
 
@@ -1379,24 +1516,23 @@ tr:hover {
 }
 
 @media (max-width: 640px) {
-  /* Header: title left, menu right, tabs below */
+  /* Header: single row of tabs, logo hidden */
   .app-header {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    grid-template-rows: auto auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding-top: max(8px, env(safe-area-inset-top, 0px));
     padding-bottom: 8px;
-    padding-left: max(12px, env(safe-area-inset-left, 0px));
-    padding-right: max(12px, env(safe-area-inset-right, 0px));
-    gap: 8px;
+    padding-left: max(8px, env(safe-area-inset-left, 0px));
+    padding-right: max(8px, env(safe-area-inset-right, 0px));
   }
 
   .app-header-brand {
-    grid-column: 1;
-    grid-row: 1;
-    align-self: center;
-    min-width: 0;
-    gap: 8px;
+    display: none;
+  }
+
+  .header-right {
+    display: none;
   }
 
   .stevie-logo-clip-sm {
@@ -1404,22 +1540,22 @@ tr:hover {
     height: 28px;
   }
 
-  /* 44px minimum tap target; logo stays 40px inside (matches prior visual weight). */
+  /* 44px minimum tap target; logo stays 32px inside for better balance with dropdown. */
   .stevie-mood-btn {
     width: 44px;
     height: 44px;
   }
 
   .stevie-mood-btn .stevie-logo-clip-sm {
-    width: 40px;
-    height: 40px;
-    max-width: 40px;
-    max-height: 40px;
+    width: 32px;
+    height: 32px;
+    max-width: 32px;
+    max-height: 32px;
   }
 
   .stevie-mood-btn .stevie-logo-clip img {
-    width: 40px;
-    height: 40px;
+    width: 32px;
+    height: 32px;
   }
 
   .stevie-mood-popover:not(.stevie-mood-popover--thought) {
@@ -1478,40 +1614,27 @@ tr:hover {
     margin: 0;
   }
 
-  .header-right {
-    grid-column: 2;
-    grid-row: 1;
-    align-self: center;
-  }
-
-  .user-menu-btn {
-    padding: 4px 10px;
-    min-height: 32px;
-    font-size: 13px;
-    gap: 5px;
-  }
-
-  .user-menu-btn svg {
-    width: 10px;
-    height: 10px;
-  }
-
   .tabs {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    flex: 1;
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     justify-content: center;
+    scrollbar-width: none;
+    gap: 2px;
+  }
+
+  .tabs::-webkit-scrollbar {
+    display: none;
   }
 
   .tab {
-    min-height: 40px;
-    padding: 8px 12px;
+    min-height: 36px;
+    padding: 6px 10px;
     font-size: 13px;
     flex-shrink: 0;
   }
 
-  /* Main content — extra bottom space so charts clear mobile browser chrome */
+  /* Main content */
   .app-main {
     padding: 16px max(12px, env(safe-area-inset-right, 0px)) max(32px, calc(20px + env(safe-area-inset-bottom, 0px)))
       max(12px, env(safe-area-inset-left, 0px));
@@ -1532,10 +1655,11 @@ tr:hover {
     padding: 10px 28px 10px 12px;
   }
 
-  /* Stat cards: 2×2 grid to match transactions filters / index density */
+  /* Stat cards: compact 2-column grid on mobile */
   .stats-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 8px;
+    gap: 6px;
+    margin-bottom: 16px;
   }
   .stats-summary--5 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1545,9 +1669,66 @@ tr:hover {
     grid-column: 1 / -1;
   }
 
+  .monthly-summary-compact {
+    margin-bottom: 12px;
+  }
+
+  .monthly-summary-compact-title {
+    padding: 10px 14px 8px;
+    font-size: 13px;
+  }
+
+  /* Mobile: stacked rows instead of grid */
+  .monthly-summary-grid,
+  .monthly-summary-grid--4 {
+    grid-template-columns: 1fr;
+    gap: 0;
+    padding: 0;
+  }
+
+  .monthly-summary-cell {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 10px 14px;
+    gap: 8px;
+    border-left: 3px solid var(--cell-accent, #7b6fc4);
+    border-radius: 0;
+    background: transparent;
+    --cell-tint: transparent;
+  }
+
+  .monthly-summary-cell:hover {
+    transform: none;
+    box-shadow: none;
+    background: var(--bg-hover);
+  }
+
+  .monthly-summary-cell:not(:first-child) {
+    border-top: 1px solid var(--border);
+  }
+
+  .monthly-summary-grid--4 .monthly-summary-value {
+    font-size: 15px;
+  }
+
+  .monthly-summary-value {
+    font-size: 15px;
+    font-weight: 600;
+  }
+
+  .monthly-summary-detail {
+    display: none;
+  }
+
+  .monthly-summary-label {
+    font-size: 13px;
+    color: var(--text);
+  }
+
 
   .spark-card {
-    padding: 12px;
+    padding: 10px;
     overflow: hidden;
     min-width: 0;
   }
@@ -1556,8 +1737,21 @@ tr:hover {
     overflow: visible;
   }
 
+  .spark-card-label {
+    font-size: 11px;
+    margin-bottom: 2px;
+  }
+
   .spark-card-value {
-    font-size: 19px;
+    font-size: 17px;
+  }
+
+  .spark-card-subtitle {
+    font-size: 12px;
+  }
+
+  .spark-card-change-pct {
+    font-size: 12px;
   }
 
   /* Charts */
@@ -2099,6 +2293,7 @@ tr:hover {
 
 .chart-card h3 {
   font-size: 15px;
+  font-weight: 500;
   margin-bottom: 16px;
   color: var(--text-muted);
 }
@@ -2151,6 +2346,7 @@ tr:hover {
 
 .category-breakdown h3 {
   font-size: 15px;
+  font-weight: 500;
   margin-bottom: 16px;
   color: var(--text-muted);
 }
@@ -2273,7 +2469,7 @@ tr:hover {
 }
 
 .category-parent-row .category-bar-label {
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .cat-sub-count {
@@ -2709,6 +2905,37 @@ tr:hover {
   color: var(--text-muted);
 }
 
+.settings-card-row-title--danger {
+  color: var(--red);
+}
+
+.settings-card-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  color: var(--text);
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.settings-card-btn:hover {
+  background: var(--bg-hover);
+}
+
+.settings-card-btn--danger {
+  color: var(--red);
+  border-color: var(--red);
+}
+
+.settings-card-btn--danger:hover {
+  background: color-mix(in srgb, var(--red) 10%, var(--bg-card));
+}
+
 
 @media (max-width: 640px) {
   .settings-card-row {
@@ -2840,8 +3067,12 @@ tr:hover {
   pointer-events: none;
 }
 
-/* Blur amounts: chart y-axis dollar labels */
+/* Blur amounts: chart axis dollar labels (Y and X) */
 .blur-amounts .chart-card svg text {
+  filter: blur(4px);
+}
+/* Some browsers ignore filter on individual <text>; target axis groups as fallback */
+.blur-amounts .chart-card svg g[transform] text {
   filter: blur(4px);
 }
 
@@ -2892,6 +3123,73 @@ tr:hover {
 .transactions-table.mappings-cards-table .mapping-cell-actions,
 .transactions-table.fixed-expenses-table .mapping-cell-actions {
   width: 20%;
+  text-align: right;
+}
+
+/* Right-align toggles and buttons inside action cells */
+.transactions-table .mapping-cell-actions {
+  text-align: right;
+}
+
+.transactions-table .mapping-cell-actions .fixed-expense-toggle {
+  display: inline-flex;
+  float: right;
+}
+
+/* Toast notification */
+.toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  padding: 10px 20px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 300;
+  animation: toastIn 0.2s ease-out, toastOut 0.3s ease-in 2s forwards;
+  pointer-events: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateX(-50%) translateY(10px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+@keyframes toastOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+/* Danger card (e.g. delete account) */
+.danger-card {
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  padding: 20px;
+  margin-top: 32px;
+}
+
+.danger-card-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+
+.danger-card-desc {
+  font-size: 14px;
+  color: var(--text-muted);
+  margin: 0 0 16px;
+  line-height: 1.5;
+}
+
+.danger-card-actions {
+  display: flex;
+  justify-content: flex-end;
 }
 
 
