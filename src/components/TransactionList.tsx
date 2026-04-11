@@ -34,6 +34,7 @@ interface StatementInfo {
   periodStart: string;
   periodEnd: string;
   cardProfileId?: string;
+  status?: string;
 }
 
 interface Props {

@@ -3,13 +3,12 @@ import { useDropzone } from 'react-dropzone';
 import { collection, addDoc, getDocs, deleteDoc, doc, query, where, writeBatch, Timestamp, orderBy } from 'firebase/firestore';
 import { db } from '../firebase';
 import { parseStatement } from '../lib/parser';
+import type { CategoryMapping } from '../lib/categorize';
 import { reconcileBillingPeriod } from '../lib/statementPeriod';
 import { Modal, ModalBodyPanel } from './ui/Modal';
-import type { CategoryMapping } from '../lib/categorize';
 import type { CardProfile } from '../types';
 
 interface Props {
-  /** Called after a successful upload with the new statement document id (for deep-linking Transactions). */
   onUploaded: (newStatementId?: string) => void;
   householdId: string;
 }
@@ -22,6 +21,7 @@ interface StatementInfo {
   totalBalance: number;
   filename: string;
   cardProfileId?: string;
+  status?: string;
 }
 
 function formatStmtDate(dateStr: string): string {
@@ -45,7 +45,6 @@ export function Upload({ onUploaded, householdId }: Props) {
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [expandedUploadGroups, setExpandedUploadGroups] = useState<Set<string>>(new Set());
   const [uploadModalCardId, setUploadModalCardId] = useState<string | null>(null);
-  /** Per-household: first load opens all card sections (and Other Statements if needed). */
   const uploadAccordionInitForHouseholdRef = useRef<string | null>(null);
 
   const fetchStatements = useCallback(async () => {
@@ -85,14 +84,10 @@ export function Upload({ onUploaded, householdId }: Props) {
       let changed = false;
       const next = new Set(prev);
       for (const p of cardProfiles) {
-        if (p.id && !next.has(p.id)) {
-          next.add(p.id);
-          changed = true;
-        }
+        if (p.id && !next.has(p.id)) { next.add(p.id); changed = true; }
       }
       if (statements.some((s) => !s.cardProfileId) && !next.has('__general__')) {
-        next.add('__general__');
-        changed = true;
+        next.add('__general__'); changed = true;
       }
       return changed ? next : prev;
     });
@@ -106,33 +101,53 @@ export function Upload({ onUploaded, householdId }: Props) {
       setMessage('');
 
       try {
-        // Read file as Uint8Array
         const buffer = await files[0].arrayBuffer();
         const data = new Uint8Array(buffer);
 
-        // Load household's category mappings
         const mappingsSnap = await getDocs(collection(db, 'households', householdId, 'categoryMappings'));
         const mappings: CategoryMapping[] = mappingsSnap.docs.map((doc) => doc.data() as CategoryMapping);
-
-        // Find selected card profile (if any)
         const selectedProfile = cardProfiles.find((p) => p.id === selectedProfileId);
-
-        // Parse the PDF using card profile for format-aware parsing
         const parsed = await parseStatement(data, mappings, selectedProfile);
 
-        // Check for duplicate
+        // Check for duplicate finalized statement
         const existingSnap = await getDocs(
-          query(
-            collection(db, 'households', householdId, 'statements'),
-            where('statementDate', '==', parsed.statementDate)
-          )
+          query(collection(db, 'households', householdId, 'statements'), where('statementDate', '==', parsed.statementDate))
         );
-        if (!existingSnap.empty) {
+        const existingFinalized = existingSnap.docs.filter((d) => d.data().status !== 'in-progress');
+        if (existingFinalized.length > 0) {
           setStatus('error');
           setMessage('Statement already uploaded');
           return;
         }
-        // Save statement
+
+        // Reconcile any in-progress statements for this period
+        const allInProgressSnap = await getDocs(
+          query(collection(db, 'households', householdId, 'statements'), where('status', '==', 'in-progress'))
+        );
+        const overlapping = allInProgressSnap.docs.filter((d) => {
+          const data = d.data();
+          if (selectedProfileId && data.cardProfileId !== selectedProfileId) return false;
+          if (!selectedProfileId && data.cardProfileId) return false;
+          const ipStart = data.periodStart;
+          const ipEnd = data.periodEnd;
+          if (!ipStart || !ipEnd) return false;
+          return ipStart <= parsed.periodEnd && ipEnd >= parsed.periodStart;
+        });
+
+        let reconciledCount = 0;
+        const inProgressIds = new Set([
+          ...existingSnap.docs.filter((d) => d.data().status === 'in-progress').map((d) => d.id),
+          ...overlapping.map((d) => d.id),
+        ]);
+
+        if (inProgressIds.size > 0) {
+          const allTxnSnap = await getDocs(collection(db, 'households', householdId, 'transactions'));
+          const inProgressTxns = allTxnSnap.docs.filter((d) => inProgressIds.has(d.data().statementId));
+          reconciledCount = inProgressTxns.length;
+          for (const txnDoc of inProgressTxns) await deleteDoc(txnDoc.ref);
+          for (const stmtId of inProgressIds) await deleteDoc(doc(db, 'households', householdId, 'statements', stmtId));
+        }
+
         const stmtRef = await addDoc(collection(db, 'households', householdId, 'statements'), {
           filename: files[0].name,
           statementDate: parsed.statementDate,
@@ -140,10 +155,10 @@ export function Upload({ onUploaded, householdId }: Props) {
           periodEnd: parsed.periodEnd,
           totalBalance: parsed.totalBalance,
           uploadedAt: Timestamp.now(),
+          status: 'finalized',
           ...(selectedProfileId ? { cardProfileId: selectedProfileId } : {}),
         });
 
-        // Save transactions in batches of 500 (Firestore limit)
         const txnCol = collection(db, 'households', householdId, 'transactions');
         for (let i = 0; i < parsed.transactions.length; i += 500) {
           const batch = writeBatch(db);
@@ -160,6 +175,7 @@ export function Upload({ onUploaded, householdId }: Props) {
               cardholder: txn.cardholder,
               category: txn.category,
               confirmed: txn.confirmed,
+              source: 'pdf',
               ...(selectedProfileId ? { cardProfileId: selectedProfileId } : {}),
             });
           }
@@ -167,7 +183,8 @@ export function Upload({ onUploaded, householdId }: Props) {
         }
 
         setStatus('success');
-        setMessage(`${parsed.transactions.length} transactions imported`);
+        const reconMsg = reconciledCount > 0 ? ` (reconciled ${reconciledCount} in-progress transactions)` : '';
+        setMessage(`${parsed.transactions.length} transactions imported${reconMsg}`);
         setTimeout(async () => {
           await fetchStatements();
           onUploaded(stmtRef.id);
@@ -186,7 +203,7 @@ export function Upload({ onUploaded, householdId }: Props) {
     const s = statements.find((x) => x.id === deleteTargetId);
     if (!s) return 'This statement and all of its transactions will be permanently removed.';
     const r = reconcileBillingPeriod(s.periodStart, s.periodEnd);
-    return `“${s.filename}” (${formatStmtDate(s.statementDate)} · ${r.periodStart} to ${r.periodEnd}) and all of its transactions will be permanently removed.`;
+    return `"${s.filename}" (${formatStmtDate(s.statementDate)} · ${r.periodStart} to ${r.periodEnd}) and all of its transactions will be permanently removed.`;
   }, [deleteTargetId, statements]);
 
   const confirmDeleteStatement = async () => {
@@ -235,10 +252,9 @@ export function Upload({ onUploaded, householdId }: Props) {
       <h2>Statements</h2>
 
       {cardProfiles.length === 0 ? (
-        <p className="empty-state">No cards set up yet. Add a card from the Mappings tab to start uploading statements.</p>
+        <p className="empty-state">No cards set up yet. Add a card from the Settings tab to start uploading statements.</p>
       ) : (
         (() => {
-          // Group statements by card profile
           const byCard = new Map<string, StatementInfo[]>();
           const ungrouped: StatementInfo[] = [];
           for (const s of statements) {

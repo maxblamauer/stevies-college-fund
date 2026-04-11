@@ -9,7 +9,7 @@ import { billingPeriodInclusiveDays, reconcileBillingPeriod } from '../lib/state
 import { CHILD_TO_PARENT } from '../lib/categoryGroups';
 import { monthlyFixedTotal } from '../lib/fixedExpenses';
 import { offsetStatementLabel, offsetStatementAxisLabel, offsetStatementFullLabel, offsetStatementDropdownLabel } from '../lib/statementMonthOffset';
-import type { FixedExpense, IncomeSource } from '../types';
+import type { BudgetGoal, FixedExpense, IncomeSource } from '../types';
 import type { StevieMoodReport } from '../lib/stevieMood';
 
 const CATEGORY_COLORS: Record<string, string> = {
@@ -106,7 +106,7 @@ function buildGroupedCategories(byCategory: CategoryStat[]): GroupedCategory[] {
 }
 
 interface CategoryStat { category: string; total: number; count: number; }
-interface StatementInfo { id: string; statementDate: string; periodStart: string; periodEnd: string; totalBalance: number; filename: string; cardProfileId?: string; }
+interface StatementInfo { id: string; statementDate: string; periodStart: string; periodEnd: string; totalBalance: number; filename: string; cardProfileId?: string; status?: string; }
 interface TransactionDoc { statementId: string; transDate: string; amount: number; isCredit: boolean; cardholder: string; category: string; cardProfileId?: string; reimbursed?: boolean; partialPayAmount?: number; }
 
 interface CardProfileInfo { id: string; cardLabel: string; bankName: string; }
@@ -160,6 +160,7 @@ export function Dashboard({
   const [cardProfiles, setCardProfiles] = useState<CardProfileInfo[]>([]);
   const [fixedExpenses, setFixedExpenses] = useState<FixedExpense[]>([]);
   const [incomeSources, setIncomeSources] = useState<IncomeSource[]>([]);
+  const [budgetGoals, setBudgetGoals] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
   const [trendHoverX, setTrendHoverX] = useState<number | null>(null);
 
@@ -172,7 +173,7 @@ export function Dashboard({
       );
       const stmts = stmtSnap.docs
         .map((d) => ({ id: d.id, ...d.data() } as StatementInfo))
-        .filter((s) => s.periodStart && s.periodEnd);
+        .filter((s) => s.periodStart && s.periodEnd && s.status !== 'in-progress');
       setStatements(stmts);
 
       // Load all transactions
@@ -198,6 +199,19 @@ export function Dashboard({
         setIncomeSources(incSnap.docs.map((d) => ({ id: d.id, ...d.data() } as IncomeSource)));
       } catch {
         setIncomeSources([]);
+      }
+
+      // Load budget goals
+      try {
+        const bgSnap = await getDocs(collection(db, 'households', householdId, 'budgetGoals'));
+        const map = new Map<string, number>();
+        for (const d of bgSnap.docs) {
+          const data = d.data() as BudgetGoal;
+          map.set(data.category, data.monthlyAmount);
+        }
+        setBudgetGoals(map);
+      } catch {
+        setBudgetGoals(new Map());
       }
 
       setLoading(false);
@@ -1063,6 +1077,7 @@ export function Dashboard({
                   if (!group.isParent) {
                     const reimb = reimbursedByCategory.get(group.name) || 0;
                     const reimbPct = group.total > 0 ? (reimb / group.total) * 100 : 0;
+                    const budgetLimit = selectedStatement ? budgetGoals.get(group.name) : undefined;
                     return (
                       <div key={group.name} className="category-bar-row clickable" onClick={() => onCategoryClick(group.name)}>
                         <div className="category-bar-label">
@@ -1075,6 +1090,13 @@ export function Dashboard({
                               <div className="category-bar-reimb" style={{ width: `${reimbPct}%` }} title={`${fmtMoney(reimb)} refunded/reimbursed`} />
                             )}
                           </div>
+                          {budgetLimit !== undefined && (
+                            <div
+                              className={`budget-marker ${group.total > budgetLimit ? 'budget-marker--over' : ''}`}
+                              style={{ left: `${Math.min((budgetLimit / maxTotal) * 100, 100)}%` }}
+                              title={`Budget: ${fmtMoney(budgetLimit)}`}
+                            />
+                          )}
                         </div>
                         <div className="category-bar-amount">
                           {reimb > 0 ? (
@@ -1138,6 +1160,7 @@ export function Dashboard({
                             const childColor = getColor(child.category);
                             const childReimb = reimbursedByCategory.get(child.category) || 0;
                             const childReimbPct = child.total > 0 ? (childReimb / child.total) * 100 : 0;
+                            const childBudget = selectedStatement ? budgetGoals.get(child.category) : undefined;
                             return (
                               <div
                                 key={child.category}
@@ -1154,6 +1177,13 @@ export function Dashboard({
                                       <div className="category-bar-reimb" style={{ width: `${childReimbPct}%` }} title={`${fmtMoney(childReimb)} reimbursed`} />
                                     )}
                                   </div>
+                                  {childBudget !== undefined && (
+                                    <div
+                                      className={`budget-marker ${child.total > childBudget ? 'budget-marker--over' : ''}`}
+                                      style={{ left: `${Math.min((childBudget / maxTotal) * 100, 100)}%` }}
+                                      title={`Budget: ${fmtMoney(childBudget)}`}
+                                    />
+                                  )}
                                 </div>
                                 <div className="category-bar-amount">
                                   {childReimb > 0 ? (

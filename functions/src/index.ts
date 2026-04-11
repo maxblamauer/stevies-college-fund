@@ -125,3 +125,125 @@ Return ONLY this JSON structure. No markdown fences, no explanation:
     return result;
   }
 );
+
+export const extractScreenshot = onCall(
+  { secrets: [anthropicKey], cors: true, maxInstances: 2 },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'Must be signed in');
+    }
+
+    const { imageBase64, mediaType, existingTransactions } = request.data as {
+      imageBase64: string;
+      mediaType: 'image/png' | 'image/jpeg' | 'image/webp';
+      existingTransactions?: Array<{ date: string; description: string; amount: number }>;
+    };
+
+    if (!imageBase64 || !mediaType) {
+      throw new HttpsError('invalid-argument', 'imageBase64 and mediaType are required');
+    }
+
+    let dedupeInstructions = '';
+    if (existingTransactions && existingTransactions.length > 0) {
+      dedupeInstructions = `\n\nIMPORTANT: The user already has these transactions recorded. Do NOT include any transaction that matches one below (same date, similar description, same amount). Mark any you skip in a "skipped" array with the reason.
+Existing transactions:
+${existingTransactions.map((t) => `- ${t.date} | ${t.description} | $${t.amount}`).join('\n')}`;
+    }
+
+    const client = new Anthropic({ apiKey: anthropicKey.value() });
+
+    const message = await client.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 4096,
+      messages: [{
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: mediaType,
+              data: imageBase64,
+            },
+          },
+          {
+            type: 'text',
+            text: `Extract all transactions from this bank/credit card statement screenshot.
+
+For each transaction, extract:
+- date: the transaction date in YYYY-MM-DD format. Use the year from the dates shown in the screenshot. If no year is visible, use the current year (${new Date().getFullYear()}).
+- description: the merchant/description text exactly as shown
+- amount: the dollar amount as a number (no $ sign)
+- isPending: true if the transaction is listed under "PENDING" or similar, false if posted/completed
+- isCredit: true if this is a credit/refund/payment, false for charges
+
+Also determine:
+- statementMonth: the billing month these transactions belong to, in YYYY-MM format (based on the dates shown)
+- periodStart: the earliest transaction date in YYYY-MM-DD
+- periodEnd: the latest transaction date in YYYY-MM-DD
+${dedupeInstructions}
+
+Return ONLY this JSON structure. No markdown fences, no explanation:
+{
+  "statementMonth": "YYYY-MM",
+  "periodStart": "YYYY-MM-DD",
+  "periodEnd": "YYYY-MM-DD",
+  "transactions": [
+    {
+      "date": "YYYY-MM-DD",
+      "description": "...",
+      "amount": 0.00,
+      "isPending": false,
+      "isCredit": false
+    }
+  ],
+  "skipped": [
+    {
+      "date": "YYYY-MM-DD",
+      "description": "...",
+      "amount": 0.00,
+      "reason": "duplicate of existing transaction"
+    }
+  ]
+}`,
+          },
+        ],
+      }],
+    });
+
+    const text = message.content[0].type === 'text' ? message.content[0].text : '';
+    const cleaned = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    let result: {
+      statementMonth: string;
+      periodStart: string;
+      periodEnd: string;
+      transactions: Array<{
+        date: string;
+        description: string;
+        amount: number;
+        isPending: boolean;
+        isCredit: boolean;
+      }>;
+      skipped?: Array<{
+        date: string;
+        description: string;
+        amount: number;
+        reason: string;
+      }>;
+    };
+
+    try {
+      result = JSON.parse(cleaned);
+    } catch {
+      throw new HttpsError('internal', 'Failed to parse Claude response');
+    }
+
+    // Validate transactions have required fields
+    result.transactions = (result.transactions || []).filter(
+      (t) => t.date && t.description && typeof t.amount === 'number'
+    );
+
+    return result;
+  }
+);

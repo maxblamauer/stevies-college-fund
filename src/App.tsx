@@ -149,7 +149,7 @@ function App() {
 
       // Delete all Firestore data
       if (householdId) {
-        const subcollections = ['transactions', 'statements', 'categoryMappings', 'cardProfiles', 'fixedExpenses', 'incomeSources', 'members'];
+        const subcollections = ['transactions', 'statements', 'categoryMappings', 'cardProfiles', 'fixedExpenses', 'incomeSources', 'budgetGoals', 'members'];
         for (const sub of subcollections) {
           const snap = await getDocs(collection(db, 'households', householdId, sub));
           // Batch delete in groups of 500 (Firestore limit)

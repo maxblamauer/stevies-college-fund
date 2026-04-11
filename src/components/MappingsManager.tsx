@@ -7,7 +7,7 @@ import { parseStatement, extractText } from '../lib/parser';
 import { extractMerchantPattern } from '../lib/categorize';
 import { FilterSelect } from './ui/FilterSelect';
 import { Modal, ModalBodyPanel } from './ui/Modal';
-import type { CardProfile, FixedExpense, IncomeSource } from '../types';
+import type { BudgetGoal, CardProfile, FixedExpense, IncomeSource } from '../types';
 import { CATEGORIES } from '../types';
 
 interface Mapping {
@@ -86,8 +86,15 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange,
   const [incomeError, setIncomeError] = useState('');
   const [addingIncome, setAddingIncome] = useState(false);
 
+  const [budgetGoals, setBudgetGoals] = useState<(BudgetGoal & { id: string })[]>([]);
+  const [addingBudget, setAddingBudget] = useState(false);
+  const [editingBudgetId, setEditingBudgetId] = useState<string | null>(null);
+  const [budgetCategory, setBudgetCategory] = useState('');
+  const [budgetAmount, setBudgetAmount] = useState('');
+  const [budgetError, setBudgetError] = useState('');
+
   const [deleteTarget, setDeleteTarget] = useState<
-    { kind: 'card'; id: string } | { kind: 'mapping'; id: string } | { kind: 'expense'; id: string } | { kind: 'income'; id: string } | null
+    { kind: 'card'; id: string } | { kind: 'mapping'; id: string } | { kind: 'expense'; id: string } | { kind: 'income'; id: string } | { kind: 'budget'; id: string } | null
   >(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [expandedMappingGroups, setExpandedMappingGroups] = useState<Set<string>>(new Set());
@@ -139,12 +146,26 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange,
     }
   }, [householdId]);
 
+  const fetchBudgetGoals = useCallback(async () => {
+    try {
+      const snap = await getDocs(collection(db, 'households', householdId, 'budgetGoals'));
+      setBudgetGoals(
+        snap.docs
+          .map((d) => ({ id: d.id, ...d.data() } as BudgetGoal & { id: string }))
+          .sort((a, b) => a.category.localeCompare(b.category))
+      );
+    } catch {
+      setBudgetGoals([]);
+    }
+  }, [householdId]);
+
   useEffect(() => {
     fetchMappings();
     fetchCardProfiles();
     fetchFixedExpenses();
     fetchIncomeSources();
-  }, [fetchMappings, fetchCardProfiles, fetchFixedExpenses, fetchIncomeSources]);
+    fetchBudgetGoals();
+  }, [fetchMappings, fetchCardProfiles, fetchFixedExpenses, fetchIncomeSources, fetchBudgetGoals]);
 
   const deleteMappingDoc = async (id: string) => {
     await deleteDoc(doc(db, 'households', householdId, 'categoryMappings', id));
@@ -207,6 +228,26 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange,
     } catch (err) {
       console.error('Save expense error:', err);
       setExpenseError(err instanceof Error ? err.message : 'Could not save.');
+    }
+  };
+
+  const saveBudget = async () => {
+    if (!editingBudgetId && !budgetCategory) { setBudgetError('Select a category.'); return; }
+    const amount = parseFloat(budgetAmount);
+    if (!amount || amount <= 0) { setBudgetError('Enter a valid amount.'); return; }
+    setBudgetError('');
+    try {
+      if (editingBudgetId) {
+        await updateDoc(doc(db, 'households', householdId, 'budgetGoals', editingBudgetId), { monthlyAmount: amount });
+      } else {
+        await addDoc(collection(db, 'households', householdId, 'budgetGoals'), { category: budgetCategory, monthlyAmount: amount });
+      }
+      setAddingBudget(false);
+      setEditingBudgetId(null);
+      fetchBudgetGoals();
+    } catch (err) {
+      console.error('Save budget error:', err);
+      setBudgetError(err instanceof Error ? err.message : 'Could not save.');
     }
   };
 
@@ -318,6 +359,9 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange,
       } else if (deleteTarget.kind === 'income') {
         await deleteDoc(doc(db, 'households', householdId, 'incomeSources', deleteTarget.id));
         fetchIncomeSources();
+      } else if (deleteTarget.kind === 'budget') {
+        await deleteDoc(doc(db, 'households', householdId, 'budgetGoals', deleteTarget.id));
+        fetchBudgetGoals();
       } else {
         await deleteMappingDoc(deleteTarget.id);
       }
@@ -349,11 +393,17 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange,
         ? `The income source for “${inc.person}” will be removed.`
         : 'This income source will be removed.';
     }
+    if (deleteTarget.kind === 'budget') {
+      const bg = budgetGoals.find((x) => x.id === deleteTarget.id);
+      return bg
+        ? `The budget for “${bg.category}” ($${bg.monthlyAmount}/mo) will be removed.`
+        : 'This budget will be removed.';
+    }
     const m = mappings.find((x) => x.id === deleteTarget.id);
     return m
       ? `The mapping “${m.merchantPattern}” → ${m.category} will be removed.`
       : 'This mapping will be removed.';
-  }, [deleteTarget, cardProfiles, mappings, fixedExpenses]);
+  }, [deleteTarget, cardProfiles, mappings, fixedExpenses, budgetGoals]);
 
   const onDrop = useCallback(async (files: File[]) => {
     if (files.length === 0) return;
@@ -953,6 +1003,133 @@ export function MappingsManager({ householdId, blurAmounts, onBlurAmountsChange,
         </div>
         {expenseError && (
           <p className="login-error household-inline-error edit-card-panel-error">{expenseError}</p>
+        )}
+      </Modal>
+
+      {/* Budget Section */}
+      <h2 className="mappings-page-section-title">Budget</h2>
+      <p className="hint">
+        Monthly spending limits per category. These show as markers on the Dashboard category breakdown when viewing a single statement.
+      </p>
+
+      <div className="table-wrapper">
+        <table className="transactions-table fixed-expenses-table">
+          <thead>
+            <tr>
+              <th>Category</th>
+              <th>Monthly Limit</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {budgetGoals.map((bg) => (
+              <tr key={bg.id}>
+                <td className="mapping-cell-primary">
+                  <strong>{bg.category}</strong>
+                </td>
+                <td className="mapping-cell-meta fixed-expense-amount">
+                  ${bg.monthlyAmount.toLocaleString('en-CA', { minimumFractionDigits: 2 })}/mo
+                </td>
+                <td className="mapping-cell-actions">
+                  <button type="button" className="btn btn-xs" onClick={() => {
+                    setEditingBudgetId(bg.id);
+                    setBudgetCategory(bg.category);
+                    setBudgetAmount(String(bg.monthlyAmount));
+                    setBudgetError('');
+                  }}>
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-xs btn-destructive"
+                    onClick={() => setDeleteTarget({ kind: 'budget', id: bg.id })}
+                  >
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {budgetGoals.length === 0 && (
+              <tr>
+                <td colSpan={3} className="empty-state" style={{ padding: '20px 14px', borderBottom: 'none' }}>
+                  No budget limits set.
+                </td>
+              </tr>
+            )}
+            <tr>
+              <td colSpan={3} className="table-action-row">
+                <button type="button" className="btn btn-xs" onClick={() => {
+                  setAddingBudget(true);
+                  setBudgetCategory('');
+                  setBudgetAmount('');
+                  setBudgetError('');
+                }}>
+                  + Budget
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <Modal
+        open={addingBudget || editingBudgetId !== null}
+        onClose={() => { setAddingBudget(false); setEditingBudgetId(null); }}
+        title={editingBudgetId ? 'Edit budget' : 'Add budget'}
+        description="Set a monthly spending limit for a category."
+      >
+        <ModalBodyPanel>
+          <div className="edit-card-panel-fields">
+            {!editingBudgetId && (
+              <label className="edit-card-field">
+                <span className="edit-card-field-label">Category</span>
+                <select
+                  className="household-input"
+                  value={budgetCategory}
+                  onChange={(e) => setBudgetCategory(e.target.value)}
+                  style={{ marginBottom: 0 }}
+                >
+                  <option value="">Select category...</option>
+                  {CATEGORIES
+                    .filter((c) => c !== 'Payment' && !budgetGoals.some((bg) => bg.category === c))
+                    .map((c) => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                </select>
+              </label>
+            )}
+            <label className="edit-card-field">
+              <span className="edit-card-field-label">Monthly limit</span>
+              <input
+                type="number"
+                className="household-input"
+                placeholder="0.00"
+                value={budgetAmount}
+                onChange={(e) => setBudgetAmount(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void saveBudget();
+                  }
+                }}
+                min="0"
+                step="0.01"
+                style={{ marginBottom: 0 }}
+                autoFocus={!!editingBudgetId}
+              />
+            </label>
+          </div>
+        </ModalBodyPanel>
+        <div className="edit-card-panel-actions">
+          <button type="button" className="btn" onClick={() => { setAddingBudget(false); setEditingBudgetId(null); }}>
+            Cancel
+          </button>
+          <button type="button" className="btn btn-save" onClick={() => void saveBudget()}>
+            {editingBudgetId ? 'Save changes' : 'Add budget'}
+          </button>
+        </div>
+        {budgetError && (
+          <p className="login-error household-inline-error edit-card-panel-error">{budgetError}</p>
         )}
       </Modal>
 

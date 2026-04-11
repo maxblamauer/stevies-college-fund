@@ -9,6 +9,7 @@ export interface Transaction {
   cardholder: string;
   category: string;
   confirmed: boolean;
+  source?: 'pdf' | 'manual' | 'screenshot';  // how the transaction was added
 }
 
 export interface Statement {
@@ -19,6 +20,7 @@ export interface Statement {
   period_end: string;
   total_balance: number;
   uploaded_at: string;
+  status?: 'in-progress' | 'finalized';  // default 'finalized' for backwards compat
 }
 
 export interface CategoryMapping {
@@ -57,6 +59,12 @@ export interface IncomeSource {
   id?: string;
   person: string;
   amount: number;        // monthly amount
+}
+
+export interface BudgetGoal {
+  id?: string;
+  category: string;
+  monthlyAmount: number;
 }
 
 export const CATEGORIES = [
